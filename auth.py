@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import create_access_token, jwt_required, JWTManager, get_jwt_identity
 import psycopg2
+import os
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -17,7 +18,10 @@ DB_PASSWORD = "13052000"
 DB_HOST = "localhost"
 DB_PORT = "5432"
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+
 def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
     return psycopg2.connect(
         database=DB_NAME, user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port=DB_PORT
     )
