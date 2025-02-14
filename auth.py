@@ -3,9 +3,12 @@ from flask_bcrypt import Bcrypt
 from flask_jwt_extended import create_access_token, jwt_required, JWTManager, get_jwt_identity
 import psycopg2
 import os
+from flask_cors import CORS
+
 
 # Initialize Flask app
 app = Flask(__name__)
+CORS(app, origins=["http://localhost:3000"])
 app.config["JWT_SECRET_KEY"] = "supersecretkey"  # Change this in production!
 
 bcrypt = Bcrypt(app)
