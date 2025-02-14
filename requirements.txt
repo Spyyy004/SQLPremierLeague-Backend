@@ -100,7 +100,6 @@ gTTS==2.5.3
 h11==0.14.0
 h2==3.2.0
 h5py==3.11.0
-hermes-dec==0.0.1
 hpack==3.0.0
 hstspreload==2024.9.1
 html5lib==1.1
