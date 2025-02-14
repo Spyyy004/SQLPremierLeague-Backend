@@ -181,6 +181,28 @@ def get_submissions():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/challenges", methods=["GET"])
+def get_challenges():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Fetch questions from the database
+        cur.execute("SELECT id, question, type FROM questions;")
+        challenges = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        # Convert to JSON format
+        challenge_list = [
+            {"id": q[0], "question": q[1], "type": q[2]} for q in challenges
+        ]
+        
+        return jsonify({"challenges": challenge_list}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ✅ Fetch User Progress (Total Questions Attempted)
 @app.route("/progress", methods=["GET"])
 @jwt_required()
