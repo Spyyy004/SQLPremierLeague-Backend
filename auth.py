@@ -46,7 +46,7 @@ def get_problem(problem_id):
 
     # Fetch table names
     cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';")
-    tables = [row[0] for row in cur.fetchall()]
+    tables = ["matches","deliveries"]
 
     table_data = {}
 
