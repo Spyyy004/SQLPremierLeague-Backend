@@ -29,6 +29,30 @@ def get_db_connection():
         database=DB_NAME, user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port=DB_PORT
     )
 
+
+@app.route("/problem/<int:problem_id>", methods=["GET"])
+def get_problem(problem_id):
+    """Fetch a single problem from the database by ID."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Fetch problem
+    cur.execute("SELECT id, question, type FROM questions WHERE id = %s;", (problem_id,))
+    problem = cur.fetchone()
+    
+    conn.close()
+
+    if problem:
+        return jsonify({
+            "problem": {
+                "id": problem[0],
+                "question": problem[1],
+                "type": problem[2]
+            }
+        })
+    else:
+        return jsonify({"error": "Problem not found"}), 404
+
 # ✅ User Registration (Signup)
 @app.route("/register", methods=["POST"])
 def register():
