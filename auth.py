@@ -32,26 +32,47 @@ def get_db_connection():
 
 @app.route("/problem/<int:problem_id>", methods=["GET"])
 def get_problem(problem_id):
-    """Fetch a single problem from the database by ID."""
+    """Fetch a single problem along with table schema and sample data."""
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Fetch problem
+    # Fetch problem details
     cur.execute("SELECT id, question, type FROM questions WHERE id = %s;", (problem_id,))
     problem = cur.fetchone()
-    
+
+    if not problem:
+        conn.close()
+        return jsonify({"error": "Problem not found"}), 404
+
+    # Fetch table names
+    cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';")
+    tables = [row[0] for row in cur.fetchall()]
+
+    table_data = {}
+
+    # Fetch table columns & 3 sample rows for each table
+    for table in tables:
+        cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}';")
+        columns = [row[0] for row in cur.fetchall()]
+
+        cur.execute(f"SELECT * FROM {table} LIMIT 3;")
+        rows = cur.fetchall()
+
+        table_data[table] = {
+            "columns": columns,
+            "sample_data": rows
+        }
+
     conn.close()
 
-    if problem:
-        return jsonify({
-            "problem": {
-                "id": problem[0],
-                "question": problem[1],
-                "type": problem[2]
-            }
-        })
-    else:
-        return jsonify({"error": "Problem not found"}), 404
+    return jsonify({
+        "problem": {
+            "id": problem[0],
+            "question": problem[1],
+            "type": problem[2],
+        },
+        "tables": table_data
+    })
 
 # ✅ User Registration (Signup)
 @app.route("/register", methods=["POST"])
