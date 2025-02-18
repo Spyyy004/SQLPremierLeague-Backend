@@ -32,7 +32,7 @@ def get_db_connection():
 
 @app.route("/problem/<int:problem_id>", methods=["GET"])
 def get_problem(problem_id):
-    """Fetch a single problem along with table schema and sample data."""
+    """Fetch a single problem along with correct schema of matches and deliveries tables."""
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -44,23 +44,21 @@ def get_problem(problem_id):
         conn.close()
         return jsonify({"error": "Problem not found"}), 404
 
-    # Fetch table names
-    cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';")
-    tables = ["matches","deliveries"]
-
+    # Define tables we want to return
+    tables = ["matches", "deliveries"]
     table_data = {}
 
-    # Fetch table columns & 3 sample rows for each table
+    # Fetch table columns in correct order & fetch sample rows
     for table in tables:
-        cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}';")
+        cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}' ORDER BY ordinal_position;")
         columns = [row[0] for row in cur.fetchall()]
 
-        cur.execute(f"SELECT * FROM {table} LIMIT 3;")
+        cur.execute(f"SELECT {', '.join(columns)} FROM {table} LIMIT 3;")  # Ensures correct column order
         rows = cur.fetchall()
 
         table_data[table] = {
             "columns": columns,
-            "sample_data": rows
+            "sample_data": rows  # This now aligns correctly
         }
 
     conn.close()
