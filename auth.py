@@ -121,7 +121,7 @@ def login():
         conn.close()
 
         if user and bcrypt.check_password_hash(user[1], password):
-            access_token = create_access_token(identity=str(user[0]),expires_delta=False)  # Convert user ID to string
+            access_token = create_access_token(identity=str(user[0]))  # Convert user ID to string
             return jsonify({"message": "Login successful", "token": access_token}), 200
         else:
             return jsonify({"error": "Invalid email or password"}), 401
