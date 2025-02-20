@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_bcrypt import Bcrypt
-from flask_jwt_extended import create_access_token, jwt_required, JWTManager, get_jwt_identity
+from flask_jwt_extended import create_access_token, jwt_required, create_refresh_token, JWTManager, get_jwt_identity
 import psycopg2
 import os
 from flask_cors import CORS
@@ -122,12 +122,70 @@ def login():
 
         if user and bcrypt.check_password_hash(user[1], password):
             access_token = create_access_token(identity=str(user[0]))  # Convert user ID to string
-            return jsonify({"message": "Login successful", "token": access_token}), 200
+            refresh_token = create_refresh_token(identity=str(user[0]))
+            return jsonify({
+                "message": "Login successful",
+                "access_token": access_token,
+                "refresh_token": refresh_token
+            }), 200
         else:
             return jsonify({"error": "Invalid email or password"}), 401
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ✅ Refresh Token Endpoint
+@app.route("/refresh", methods=["POST"])
+@jwt_required(refresh=True)  # Requires a valid refresh token
+def refresh():
+    current_user = get_jwt_identity()
+    new_access_token = create_access_token(identity=current_user)
+    return jsonify({"access_token": new_access_token}), 200
+
+
+# ✅ Get User Profile
+@app.route("/profile", methods=["GET"])
+@jwt_required()
+def get_profile():
+    user_id = get_jwt_identity()
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Fetch user details
+        cur.execute("SELECT username, email FROM users WHERE id = %s;", (user_id,))
+        user = cur.fetchone()
+
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        # Fetch user statistics
+        cur.execute("""
+            SELECT COUNT(*) AS total_submissions,
+                   SUM(CASE WHEN is_correct THEN 1 ELSE 0 END) AS correct_submissions,
+                   COUNT(DISTINCT question_id) AS unique_questions_solved
+            FROM user_answers WHERE user_id = %s;
+        """, (user_id,))
+        
+        stats = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "username": user[0],
+            "email": user[1],
+            "total_submissions": stats[0],
+            "correct_submissions": stats[1],
+            "unique_questions_solved": stats[2]
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ✅ Submit SQL Answer
 
 # ✅ Protected Route (Only Accessible with JWT Token)
 @app.route("/protected", methods=["GET"])
