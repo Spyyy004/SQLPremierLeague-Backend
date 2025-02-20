@@ -266,19 +266,31 @@ def submit_answer():
 @jwt_required()
 def get_submissions():
     user_id = get_jwt_identity()
+    question_id = request.args.get("question_id")  # Get question_id from query params
 
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        
-        cur.execute("""
-            SELECT q.id, q.question, ua.user_query, ua.is_correct, ua.submitted_at 
-            FROM user_answers ua
-            JOIN questions q ON ua.question_id = q.id
-            WHERE ua.user_id = %s
-            ORDER BY ua.submitted_at DESC
-        """, (user_id,))
-        
+
+        if question_id:
+            # Fetch submissions only for the given question_id
+            cur.execute("""
+                SELECT q.id, q.question, ua.user_query, ua.is_correct, ua.submitted_at 
+                FROM user_answers ua
+                JOIN questions q ON ua.question_id = q.id
+                WHERE ua.user_id = %s AND q.id = %s
+                ORDER BY ua.submitted_at DESC
+            """, (user_id, question_id))
+        else:
+            # Fetch all submissions for the user
+            cur.execute("""
+                SELECT q.id, q.question, ua.user_query, ua.is_correct, ua.submitted_at 
+                FROM user_answers ua
+                JOIN questions q ON ua.question_id = q.id
+                WHERE ua.user_id = %s
+                ORDER BY ua.submitted_at DESC
+            """, (user_id,))
+
         submissions = cur.fetchall()
         cur.close()
         conn.close()
