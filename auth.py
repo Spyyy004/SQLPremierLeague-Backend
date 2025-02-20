@@ -121,7 +121,7 @@ def login():
         conn.close()
 
         if user and bcrypt.check_password_hash(user[1], password):
-            access_token = create_access_token(identity=str(user[0]))  # Convert user ID to string
+            access_token = create_access_token(identity=str(user[0]),expires_delta=False)  # Convert user ID to string
             return jsonify({"message": "Login successful", "token": access_token}), 200
         else:
             return jsonify({"error": "Invalid email or password"}), 401
@@ -141,8 +141,10 @@ def protected():
 def submit_answer():
     user_id = get_jwt_identity()  # Get user ID from JWT
     data = request.get_json()
+    
     question_id = data.get("question_id")
     user_query = data.get("user_query")
+    is_submit = data.get("is_submit", False)  # Key from frontend to check if it's a submission
 
     if not question_id or not user_query:
         return jsonify({"error": "Question ID and SQL query are required"}), 400
@@ -154,7 +156,7 @@ def submit_answer():
         # Fetch the expected correct query from the database
         cur.execute("SELECT correct_query FROM questions WHERE id = %s;", (question_id,))
         correct_query = cur.fetchone()
-        
+
         if not correct_query:
             return jsonify({"error": "Invalid question ID"}), 400
         correct_query = correct_query[0]
@@ -178,18 +180,19 @@ def submit_answer():
         # Compare results
         is_correct = user_result == correct_result  # True if answers match
 
-        # Store the answer submission with evaluation result
-        cur.execute("""
-            INSERT INTO user_answers (user_id, question_id, user_query, is_correct)
-            VALUES (%s, %s, %s, %s)
-        """, (user_id, question_id, user_query, is_correct))
+        # Only store the answer if it's a submission
+        if is_submit:
+            cur.execute("""
+                INSERT INTO user_answers (user_id, question_id, user_query, is_correct)
+                VALUES (%s, %s, %s, %s)
+            """, (user_id, question_id, user_query, is_correct))
+            conn.commit()
 
-        conn.commit()
         cur.close()
         conn.close()
 
         return jsonify({
-            "message": "Answer submitted successfully",
+            "message": "Query executed successfully" if not is_submit else "Answer submitted successfully",
             "is_correct": is_correct,
             "user_query_result": user_result,
             "correct_query_result": correct_result
