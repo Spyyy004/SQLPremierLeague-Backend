@@ -11,6 +11,13 @@ app = Flask(__name__)
 CORS(app, supports_credentials=True,origins=["http://localhost:3000"])
 app.config["JWT_SECRET_KEY"] = "supersecretkey"  # Change this in production!
 
+app.config["JWT_TOKEN_LOCATION"] = ["cookies"]  # ✅ Look for JWTs in cookies instead of headers
+app.config["JWT_COOKIE_SECURE"] = True  # Set to True in production (requires HTTPS)
+app.config["JWT_ACCESS_COOKIE_NAME"] = "access_token"  # The cookie storing the access token
+app.config["JWT_REFRESH_COOKIE_NAME"] = "refresh_token"  # The cookie storing the refresh token
+
+jwt = JWTManager(app)
+
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 
