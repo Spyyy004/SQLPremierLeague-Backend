@@ -220,6 +220,7 @@ def protected():
 
 
 @app.route("/submit-answer", methods=["POST"])
+@jwt_required()
 def submit_answer():
     user_id = ""
     
