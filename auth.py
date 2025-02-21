@@ -139,6 +139,19 @@ def login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/health", methods=["GET"])
+def health_check():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT 1;")  # Simple query to check DB connection
+        cur.close()
+        conn.close()
+        return jsonify({"status": "ok", "message": "Service and database are running"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": "Database connection failed", "error": str(e)}), 500
+
+
 
 # ✅ Refresh Token Endpoint
 @app.route("/refresh", methods=["POST"])
@@ -200,7 +213,6 @@ def protected():
 
 
 @app.route("/submit-answer", methods=["POST"])
-@jwt_required()
 def submit_answer():
     user_id = get_jwt_identity()  # Get user ID from JWT
     data = request.get_json()
