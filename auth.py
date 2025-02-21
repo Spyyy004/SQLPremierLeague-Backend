@@ -286,6 +286,73 @@ def submit_answer():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/run-answer", methods=["POST"])
+def submit_answer():
+    user_id = ""
+    
+    data = request.get_json()
+    
+    question_id = data.get("question_id")
+    user_query = data.get("user_query")
+    is_submit = data.get("is_submit", False)  # Key from frontend to check if it's a submission
+    if is_submit:
+        user_id = get_jwt_identity()
+    if not question_id or not user_query:
+        return jsonify({"error": "Question ID and SQL query are required"}), 400
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Fetch the expected correct query from the database
+        cur.execute("SELECT correct_query FROM questions WHERE id = %s;", (question_id,))
+        correct_query = cur.fetchone()
+
+        if not correct_query:
+            return jsonify({"error": "Invalid question ID"}), 400
+        correct_query = correct_query[0]
+
+        # Execute the correct query
+        cur.execute(correct_query)
+        correct_result = cur.fetchall()
+
+        # Execute the user-submitted query
+        try:
+            cur.execute(user_query)
+            user_result = cur.fetchall()
+        except Exception as e:
+            return jsonify({
+                "error": "Invalid SQL query",
+                "details": str(e),
+                "user_query_result": None,
+                "correct_query_result": correct_result
+            }), 400
+
+        # Compare results
+        is_correct = user_result == correct_result  # True if answers match
+
+        # Only store the answer if it's a submission
+        if is_submit:
+            cur.execute("""
+                INSERT INTO user_answers (user_id, question_id, user_query, is_correct)
+                VALUES (%s, %s, %s, %s)
+            """, (user_id, question_id, user_query, is_correct))
+            conn.commit()
+
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "message": "Query executed successfully" if not is_submit else "Answer submitted successfully",
+            "is_correct": is_correct,
+            "user_query_result": user_result,
+            "correct_query_result": correct_result
+        }), 201
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ✅ Fetch User Submissions
 
 
