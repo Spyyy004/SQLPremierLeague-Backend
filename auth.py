@@ -214,13 +214,15 @@ def protected():
 
 @app.route("/submit-answer", methods=["POST"])
 def submit_answer():
-    user_id = get_jwt_identity()  # Get user ID from JWT
+    user_id = ""
+    
     data = request.get_json()
     
     question_id = data.get("question_id")
     user_query = data.get("user_query")
     is_submit = data.get("is_submit", False)  # Key from frontend to check if it's a submission
-
+    if is_submit:
+        user_id = get_jwt_identity()
     if not question_id or not user_query:
         return jsonify({"error": "Question ID and SQL query are required"}), 400
 
