@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import create_access_token, jwt_required, create_refresh_token, JWTManager, get_jwt_identity
 import psycopg2
@@ -8,7 +8,7 @@ from flask_cors import CORS
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000"])
+CORS(app, supports_credentials=True,origins=["http://localhost:3000"])
 app.config["JWT_SECRET_KEY"] = "supersecretkey"  # Change this in production!
 
 bcrypt = Bcrypt(app)
@@ -123,11 +123,16 @@ def login():
         if user and bcrypt.check_password_hash(user[1], password):
             access_token = create_access_token(identity=str(user[0]))  # Convert user ID to string
             refresh_token = create_refresh_token(identity=str(user[0]))
-            return jsonify({
-                "message": "Login successful",
-                "access_token": access_token,
-                "refresh_token": refresh_token
-            }), 200
+            response = make_response(jsonify({"message": "Login successful"}))
+            response.set_cookie(
+            "access_token", access_token,
+            httponly=True, samesite="Lax", secure=True  # Secure=True for HTTPS
+            )
+            response.set_cookie(
+            "refresh_token", refresh_token,
+            httponly=True, samesite="Lax", secure=True
+            )
+            return response
         else:
             return jsonify({"error": "Invalid email or password"}), 401
 
