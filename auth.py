@@ -287,7 +287,7 @@ def submit_answer():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/run-answer", methods=["POST"])
-def submit_answer():
+def run_answer():
     user_id = ""
     
     data = request.get_json()
