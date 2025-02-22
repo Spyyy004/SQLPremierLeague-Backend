@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, make_response
 from flask_bcrypt import Bcrypt
-from flask_jwt_extended import create_access_token, jwt_required, create_refresh_token, JWTManager, get_jwt_identity
+from flask_jwt_extended import create_access_token, jwt_required, create_refresh_token, JWTManager, get_jwt_identity, verify_jwt_in_request
 import psycopg2
 import os
 from flask_cors import CORS
@@ -226,8 +226,9 @@ def get_csrf_token():
     response.set_cookie("csrf_token", "your_secure_csrf_token", httponly=False, samesite="None")
     return response
 
+
 @app.route("/submit-answer", methods=["POST"])
-@jwt_required(optional=True)  # Allow unauthenticated users to run queries
+@jwt_required(optional=True, locations=["cookies"])  # ✅ Read token from cookies
 def submit_answer():
     data = request.get_json()
     question_id = data.get("question_id")
@@ -237,18 +238,23 @@ def submit_answer():
     if not question_id or not user_query:
         return jsonify({"error": "Question ID and SQL query are required"}), 400
 
-    # ✅ Only authenticated users can submit answers
     user_id = None
     if is_submit:
+        # ✅ Extract CSRF token
         csrf_token = request.headers.get("X-CSRF-Token")
         stored_csrf_token = request.cookies.get("csrf_token")
 
         if not csrf_token or csrf_token != stored_csrf_token:
             return jsonify({"error": "Missing or invalid CSRF token"}), 403
 
-        user_id = get_jwt_identity()
-        if not user_id:
-            return jsonify({"error": "Unauthorized"}), 401
+        # ✅ Ensure User is Authenticated for Submissions
+        try:
+            verify_jwt_in_request(locations=["cookies"])  # ✅ Explicitly check for JWT in cookies
+            user_id = get_jwt_identity()
+            if not user_id:
+                return jsonify({"error": "Unauthorized"}), 401
+        except Exception as e:
+            return jsonify({"error": "JWT Invalid", "details": str(e)}), 401
 
     conn = None  # Initialize connection
     try:
@@ -303,6 +309,8 @@ def submit_answer():
     finally:
         if conn:
             conn.close()  # ✅ Always close DB connection
+
+
 @app.route("/run-answer", methods=["POST"])
 def run_answer():
     user_id = ""
