@@ -228,7 +228,7 @@ def get_csrf_token():
 
 
 @app.route("/submit-answer", methods=["POST"])
-@jwt_required(optional=True, locations=["cookies"])  # ✅ Read token from cookies
+@jwt_required()  # ✅ Read token from cookies
 def submit_answer():
     data = request.get_json()
     question_id = data.get("question_id")
@@ -240,16 +240,8 @@ def submit_answer():
 
     user_id = None
     if is_submit:
-        # ✅ Extract CSRF token
-        csrf_token = request.headers.get("X-CSRF-Token")
-        stored_csrf_token = request.cookies.get("csrf_token")
-
-        if not csrf_token or csrf_token != stored_csrf_token:
-            return jsonify({"error": "Missing or invalid CSRF token"}), 403
-
         # ✅ Ensure User is Authenticated for Submissions
         try:
-            verify_jwt_in_request(locations=["cookies"])  # ✅ Explicitly check for JWT in cookies
             user_id = get_jwt_identity()
             if not user_id:
                 return jsonify({"error": "Unauthorized"}), 401
