@@ -143,7 +143,7 @@ def login():
             "refresh_token", refresh_token,
             httponly=True, samesite="None", secure=True
             )
-            response.set_cookie("csrf_token", csrf_token, httponly=False, secure=False, samesite="None")
+            response.set_cookie("csrf_token", csrf_token, httponly=True, secure=True, samesite="None")
             return response
         else:
             return jsonify({"error": "Invalid email or password"}), 401
