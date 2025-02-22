@@ -15,6 +15,7 @@ app.config["JWT_TOKEN_LOCATION"] = ["cookies"]  # ✅ Look for JWTs in cookies i
 app.config["JWT_COOKIE_SECURE"] = True  # Set to True in production (requires HTTPS)
 app.config["JWT_ACCESS_COOKIE_NAME"] = "access_token"  # The cookie storing the access token
 app.config["JWT_REFRESH_COOKIE_NAME"] = "refresh_token"  # The cookie storing the refresh token
+app.config["JWT_CSRF_COOKIE_NAME"] = "csrf_token"
 
 jwt = JWTManager(app)
 
