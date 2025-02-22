@@ -219,9 +219,21 @@ def protected():
     return jsonify({"message": "You have access to this protected route!"}), 200
 
 
+@app.route("/csrf-token", methods=["GET"])
+def get_csrf_token():
+    """Set CSRF token in a cookie."""
+    response = make_response(jsonify({"message": "CSRF token set"}))
+    response.set_cookie("csrf_token", "your_secure_csrf_token", httponly=False, samesite="None")
+    return response
+
 @app.route("/submit-answer", methods=["POST"])
 @jwt_required()
 def submit_answer():
+    csrf_token = request.headers.get("X-CSRF-Token")
+    stored_csrf_token = request.cookies.get("csrf_token")
+
+    if not csrf_token or csrf_token != stored_csrf_token:
+        return jsonify({"error": "Missing or invalid CSRF token"}), 403
     user_id = ""
     
     data = request.get_json()
