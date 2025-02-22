@@ -4,7 +4,7 @@ from flask_jwt_extended import create_access_token, jwt_required, create_refresh
 import psycopg2
 import os
 from flask_cors import CORS
-
+import secrets
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -109,6 +109,9 @@ def register():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+def generate_csrf_token():
+    return secrets.token_hex(32)  # 64-character random string
 # ✅ User Login (JWT Token Generation)
 @app.route("/login", methods=["POST"])
 def login():
@@ -139,6 +142,8 @@ def login():
             "refresh_token", refresh_token,
             httponly=True, samesite="None", secure=True
             )
+            csrf_token = generate_csrf_token()
+            response.set_cookie("csrf_token", csrf_token, httponly=True, secure=True, samesite="None")
             return response
         else:
             return jsonify({"error": "Invalid email or password"}), 401
@@ -230,6 +235,14 @@ def get_csrf_token():
 @app.route("/submit-answer", methods=["POST"])
 @jwt_required()  # ✅ Read token from cookies
 def submit_answer():
+    csrf_token = request.headers.get("X-CSRF-Token")
+    
+    # Get CSRF token from cookie
+    stored_csrf_token = request.cookies.get("csrf_token")
+
+    # Verify tokens match
+    if not csrf_token or csrf_token != stored_csrf_token:
+        return jsonify({"error": "Invalid CSRF token"}), 403
     data = request.get_json()
     question_id = data.get("question_id")
     user_query = data.get("user_query")
