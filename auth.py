@@ -133,6 +133,8 @@ def login():
         if user and bcrypt.check_password_hash(user[1], password):
             access_token = create_access_token(identity=str(user[0]))  # Convert user ID to string
             refresh_token = create_refresh_token(identity=str(user[0]))
+            csrf_token = generate_csrf_token()
+            response = make_response(jsonify({"message": "Login successful", "csrf_token":csrf_token}))
             response.set_cookie(
             "access_token", access_token,
             httponly=True, samesite="None", secure=True  # Secure=True for HTTPS
@@ -141,9 +143,7 @@ def login():
             "refresh_token", refresh_token,
             httponly=True, samesite="None", secure=True
             )
-            csrf_token = generate_csrf_token()
             response.set_cookie("csrf_token", csrf_token, httponly=False, secure=False, samesite="None")
-            response = make_response(jsonify({"message": "Login successful", "csrf_token":csrf_token}))
             return response
         else:
             return jsonify({"error": "Invalid email or password"}), 401
