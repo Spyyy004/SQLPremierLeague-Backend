@@ -15,7 +15,7 @@ app.config["JWT_TOKEN_LOCATION"] = ["cookies"]  # ✅ Look for JWTs in cookies i
 app.config["JWT_COOKIE_SECURE"] = True  # Set to True in production (requires HTTPS)
 app.config["JWT_ACCESS_COOKIE_NAME"] = "access_token"  # The cookie storing the access token
 app.config["JWT_REFRESH_COOKIE_NAME"] = "refresh_token"  # The cookie storing the refresh token
-app.config["JWT_CSRF_COOKIE_NAME"] = "csrf_token"
+app.config["JWT_COOKIE_CSRF_PROTECT"] = False 
 
 jwt = JWTManager(app)
 
@@ -135,7 +135,7 @@ def login():
             access_token = create_access_token(identity=str(user[0]))  # Convert user ID to string
             refresh_token = create_refresh_token(identity=str(user[0]))
             csrf_token = generate_csrf_token()
-            response = make_response(jsonify({"message": "Login successful", "csrf_token":csrf_token}))
+            response = make_response(jsonify({"message": "Login successful"}))
             response.set_cookie(
             "access_token", access_token,
             httponly=True, samesite="None", secure=True  # Secure=True for HTTPS
@@ -144,7 +144,7 @@ def login():
             "refresh_token", refresh_token,
             httponly=True, samesite="None", secure=True
             )
-            response.set_cookie("csrf_token", csrf_token, httponly=True, secure=True, samesite="None")
+            response.set_cookie("csrf_token", csrf_token, httponly=False, secure=True, samesite="None")
             return response
         else:
             return jsonify({"error": "Invalid email or password"}), 401
@@ -227,10 +227,10 @@ def protected():
 
 @app.route("/csrf-token", methods=["GET"])
 def get_csrf_token():
-    """Set CSRF token in a cookie."""
-    response = make_response(jsonify({"message": "CSRF token set"}))
-    response.set_cookie("csrf_token", "your_secure_csrf_token", httponly=False, samesite="None")
-    return response
+    csrf_token = request.cookies.get("csrf_token")
+    if not csrf_token:
+        return jsonify({"error": "No CSRF token found"}), 403
+    return jsonify({"csrf_token": csrf_token})
 
 
 @app.route("/submit-answer", methods=["POST"])
