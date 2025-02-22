@@ -235,10 +235,11 @@ def get_csrf_token():
 @app.route("/submit-answer", methods=["POST"])
 @jwt_required()
 def submit_answer():
-    csrf_token = request.cookies.get("csrf_token")
+    csrf_token_cookie = request.cookies.get("csrf_token")
+    csrf_token_header = request.headers.get("X-CSRF-Token")
 
-    if not csrf_token:
-        return jsonify({"error": "Invalid CSRF token"}), 403
+    if not csrf_token_cookie or not csrf_token_header or csrf_token_cookie != csrf_token_header:
+        return jsonify({"error": "CSRF token mismatch"}), 403  # 🚨 CSRF validation failed
     data = request.get_json()
     question_id = data.get("question_id")
     user_query = data.get("user_query")
