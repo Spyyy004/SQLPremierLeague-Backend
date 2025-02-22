@@ -143,7 +143,7 @@ def login():
             httponly=True, samesite="None", secure=True
             )
             csrf_token = generate_csrf_token()
-            response.set_cookie("csrf_token", csrf_token, httponly=True, secure=True, samesite="None")
+            response.set_cookie("csrf_token", csrf_token, httponly=False, secure=True, samesite="None")
             return response
         else:
             return jsonify({"error": "Invalid email or password"}), 401
@@ -235,12 +235,9 @@ def get_csrf_token():
 @app.route("/submit-answer", methods=["POST"])
 @jwt_required()  # ✅ Read token from cookies
 def submit_answer():
-    csrf_token = request.headers.get("X-CSRF-Token")
-    
-    # Get CSRF token from cookie
+    csrf_token = request.cookies.get("csrf_token")
     stored_csrf_token = request.cookies.get("csrf_token")
 
-    # Verify tokens match
     if not csrf_token or csrf_token != stored_csrf_token:
         return jsonify({"error": "Invalid CSRF token"}), 403
     data = request.get_json()
