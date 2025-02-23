@@ -112,25 +112,30 @@ def register():
         return jsonify({"error": str(e)}), 500
 
 
+
+
 def is_safe_query(query):
-    """Check if the query contains only allowed operations and does not access restricted tables."""
+    """Check if the query is safe before execution."""
     query = query.strip().lower()
 
-    # Allowed pattern: Only SELECT statements
+    # **Allowed pattern: SELECT statements only**
     if not query.startswith("select"):
         return False  # ✅ Query must start with SELECT
 
-    # Forbidden keywords
-    forbidden_keywords = ['delete', 'update', 'drop', 'insert', 'alter', 'truncate', 'create', 'replace']
+    # **🚨 Forbidden keywords to prevent data modification**
+    forbidden_keywords = ['delete', 'update', 'drop', 'insert', 'alter', 'truncate', 'create', 'replace', 'grant', 'revoke']
     if any(keyword in query for keyword in forbidden_keywords):
         return False  # ❌ Block dangerous operations
 
-    # **Restricted tables (Prevent access to sensitive data)**
-    restricted_tables = ['users', 'user_answers', 'tokens', 'admin_logs']  # ✅ Add any sensitive tables here
-    if any(table in query for table in restricted_tables):
-        return False  # ❌ Block access to sensitive tables
+    # **🚨 Strictly Restrict Access to Sensitive Tables**
+    restricted_tables = ['users', 'user_answers', 'tokens', 'admin_logs', 'auth_sessions']
+    pattern = re.compile(rf"\b({'|'.join(restricted_tables)})\b", re.IGNORECASE)
+
+    if pattern.search(query):
+        return False  # ❌ Block access to restricted tables
 
     return True  # ✅ Query is safe to execute
+
 
 def generate_csrf_token():
     return secrets.token_hex(32)  # 64-character random string
