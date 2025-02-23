@@ -5,6 +5,7 @@ import psycopg2
 import os
 from flask_cors import CORS
 import secrets
+import re
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -110,6 +111,25 @@ def register():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+def is_safe_query(query):
+    """Check if the query contains only SELECT statements and no harmful operations."""
+    query = query.strip().lower()
+    
+    # Allowed pattern: SELECT with optional WHERE, GROUP BY, ORDER BY, LIMIT
+    allowed_pattern = re.compile(r'^\s*select\s+', re.IGNORECASE)
+
+    # Forbidden keywords
+    forbidden_keywords = ['delete', 'update', 'drop', 'insert', 'alter', 'truncate', 'create', 'replace']
+
+    if not allowed_pattern.match(query):
+        return False  # Query must start with SELECT
+
+    for keyword in forbidden_keywords:
+        if keyword in query:
+            return False  # Forbidden keyword found
+
+    return True  # Safe to execute
 
 def generate_csrf_token():
     return secrets.token_hex(32)  # 64-character random string
@@ -236,6 +256,7 @@ def get_csrf_token():
 @app.route("/submit-answer", methods=["POST"])
 @jwt_required()
 def submit_answer():
+        
     csrf_token_cookie = request.cookies.get("csrf_token")
     csrf_token_header = request.headers.get("X-CSRF-Token")
 
@@ -245,6 +266,10 @@ def submit_answer():
     question_id = data.get("question_id")
     user_query = data.get("user_query")
     is_submit = data.get("is_submit", False)  # Submission check
+
+
+    if not is_safe_query(user_query):
+        return jsonify({"error": "Unsafe SQL query detected!"}), 400
 
     if not question_id or not user_query:
         return jsonify({"error": "Question ID and SQL query are required"}), 400
@@ -327,6 +352,9 @@ def run_answer():
         user_id = get_jwt_identity()
     if not question_id or not user_query:
         return jsonify({"error": "Question ID and SQL query are required"}), 400
+    
+    if not is_safe_query(user_query):
+        return jsonify({"error": "Unsafe SQL query detected!"}), 400
 
     try:
         conn = get_db_connection()
