@@ -113,23 +113,24 @@ def register():
 
 
 def is_safe_query(query):
-    """Check if the query contains only SELECT statements and no harmful operations."""
+    """Check if the query contains only allowed operations and does not access restricted tables."""
     query = query.strip().lower()
-    
-    # Allowed pattern: SELECT with optional WHERE, GROUP BY, ORDER BY, LIMIT
-    allowed_pattern = re.compile(r'^\s*select\s+', re.IGNORECASE)
+
+    # Allowed pattern: Only SELECT statements
+    if not query.startswith("select"):
+        return False  # ✅ Query must start with SELECT
 
     # Forbidden keywords
     forbidden_keywords = ['delete', 'update', 'drop', 'insert', 'alter', 'truncate', 'create', 'replace']
+    if any(keyword in query for keyword in forbidden_keywords):
+        return False  # ❌ Block dangerous operations
 
-    if not allowed_pattern.match(query):
-        return False  # Query must start with SELECT
+    # **Restricted tables (Prevent access to sensitive data)**
+    restricted_tables = ['users', 'user_answers', 'tokens', 'admin_logs']  # ✅ Add any sensitive tables here
+    if any(table in query for table in restricted_tables):
+        return False  # ❌ Block access to sensitive tables
 
-    for keyword in forbidden_keywords:
-        if keyword in query:
-            return False  # Forbidden keyword found
-
-    return True  # Safe to execute
+    return True  # ✅ Query is safe to execute
 
 def generate_csrf_token():
     return secrets.token_hex(32)  # 64-character random string
