@@ -333,27 +333,17 @@ def submit_answer():
         # ✅ Compare results
         is_correct = user_result == correct_result
 
-        # ✅ For submissions, check if the user has already solved this problem
+        xp_award = 0
         if is_submit and user_id:
+            # Check if the user has already solved this problem correctly
             cur.execute("""
                 SELECT COUNT(*) FROM user_answers 
                 WHERE user_id = %s AND question_id = %s AND is_correct = TRUE;
             """, (user_id, question_id))
             correct_count = cur.fetchone()[0]
-            if correct_count > 0:
-                # User already has a correct submission; do not record duplicate stats.
-                return jsonify({
-                    "message": "You have already solved this problem. Additional submissions will not be counted.",
-                    "is_correct": True,
-                    "user_query_result": user_result,
-                    "correct_query_result": correct_result,
-                    "is_repeat": True
-                }), 200
 
-            # Initialize XP award
-            xp_award = 0
-            if is_correct:
-                # Fetch the question's difficulty (type) to determine XP
+            # Award XP only if correct and this is the first correct submission.
+            if is_correct and correct_count == 0:
                 cur.execute("SELECT type FROM questions WHERE id = %s;", (question_id,))
                 question_type_row = cur.fetchone()
                 if question_type_row:
@@ -365,13 +355,13 @@ def submit_answer():
                     elif question_type == "hard":
                         xp_award = 200
 
-            # ✅ Insert the new submission
+            # ✅ Always insert the new submission record
             cur.execute("""
                 INSERT INTO user_answers (user_id, question_id, user_query, is_correct)
                 VALUES (%s, %s, %s, %s)
             """, (user_id, question_id, user_query, is_correct))
             
-            # Update the user's XP if the submission is correct and XP award is applicable
+            # Update the user's XP only if applicable
             if is_correct and xp_award > 0:
                 cur.execute("""
                     UPDATE users 
@@ -386,7 +376,7 @@ def submit_answer():
             "is_correct": is_correct,
             "user_query_result": user_result,
             "correct_query_result": correct_result,
-            "is_repeat":False
+            "is_repeat": (user_id is not None and is_submit and correct_count > 0)
         }), 201
 
     except Exception as e:
