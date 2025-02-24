@@ -198,7 +198,12 @@ def health_check():
 def refresh():
     current_user = get_jwt_identity()
     new_access_token = create_access_token(identity=current_user)
-    return jsonify({"access_token": new_access_token}), 200
+    response = make_response(jsonify({"message": "Login successful"}))
+    response.set_cookie(
+            "access_token", new_access_token,
+            httponly=True, samesite="None", secure=True  # Secure=True for HTTPS
+            )
+    return response
 
 
 # ✅ Get User Profile
