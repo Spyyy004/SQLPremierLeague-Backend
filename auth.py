@@ -268,11 +268,11 @@ def submit_answer():
 
     if not csrf_token_cookie or not csrf_token_header or csrf_token_cookie != csrf_token_header:
         return jsonify({"error": "CSRF token mismatch"}), 403  # 🚨 CSRF validation failed
+
     data = request.get_json()
     question_id = data.get("question_id")
     user_query = data.get("user_query")
     is_submit = data.get("is_submit", False)  # Submission check
-
 
     if not is_safe_query(user_query):
         return jsonify({"error": "Unsafe SQL query detected!"}), 400
@@ -322,8 +322,23 @@ def submit_answer():
         # ✅ Compare results
         is_correct = user_result == correct_result
 
-        # ✅ Store the answer only if it's a submission
+        # ✅ For submissions, check if the user has already solved this problem
         if is_submit and user_id:
+            cur.execute("""
+                SELECT COUNT(*) FROM user_answers 
+                WHERE user_id = %s AND question_id = %s AND is_correct = TRUE;
+            """, (user_id, question_id))
+            correct_count = cur.fetchone()[0]
+            if correct_count > 0:
+                # User already has a correct submission; do not record duplicate stats.
+                return jsonify({
+                    "message": "You have already solved this problem. Additional submissions will not be counted.",
+                    "is_correct": True,
+                    "user_query_result": user_result,
+                    "correct_query_result": correct_result
+                }), 200
+
+            # ✅ Otherwise, insert the new submission
             cur.execute("""
                 INSERT INTO user_answers (user_id, question_id, user_query, is_correct)
                 VALUES (%s, %s, %s, %s)
@@ -343,6 +358,89 @@ def submit_answer():
     finally:
         if conn:
             conn.close()  # ✅ Always close DB connection
+
+# def submit_answer():
+        
+#     csrf_token_cookie = request.cookies.get("csrf_token")
+#     csrf_token_header = request.headers.get("X-CSRF-Token")
+
+#     if not csrf_token_cookie or not csrf_token_header or csrf_token_cookie != csrf_token_header:
+#         return jsonify({"error": "CSRF token mismatch"}), 403  # 🚨 CSRF validation failed
+#     data = request.get_json()
+#     question_id = data.get("question_id")
+#     user_query = data.get("user_query")
+#     is_submit = data.get("is_submit", False)  # Submission check
+
+
+#     if not is_safe_query(user_query):
+#         return jsonify({"error": "Unsafe SQL query detected!"}), 400
+
+#     if not question_id or not user_query:
+#         return jsonify({"error": "Question ID and SQL query are required"}), 400
+
+#     user_id = None
+#     if is_submit:
+#         # ✅ Ensure User is Authenticated for Submissions
+#         try:
+#             user_id = get_jwt_identity()
+#             if not user_id:
+#                 return jsonify({"error": "Unauthorized"}), 401
+#         except Exception as e:
+#             return jsonify({"error": "JWT Invalid", "details": str(e)}), 401
+
+#     conn = None  # Initialize connection
+#     try:
+#         conn = get_db_connection()
+#         cur = conn.cursor()
+
+#         # ✅ Fetch correct query from DB
+#         cur.execute("SELECT correct_query FROM questions WHERE id = %s;", (question_id,))
+#         correct_query = cur.fetchone()
+
+#         if not correct_query:
+#             return jsonify({"error": "Invalid question ID"}), 400
+#         correct_query = correct_query[0]
+
+#         # ✅ Execute correct query
+#         cur.execute(correct_query)
+#         correct_result = cur.fetchall()
+
+#         # ✅ Execute user's SQL query
+#         try:
+#             cur.execute(user_query)
+#             user_result = cur.fetchall()
+#         except Exception as e:
+#             return jsonify({
+#                 "error": "Invalid SQL query",
+#                 "details": str(e),
+#                 "user_query_result": None,
+#                 "correct_query_result": correct_result
+#             }), 400
+
+#         # ✅ Compare results
+#         is_correct = user_result == correct_result
+
+#         # ✅ Store the answer only if it's a submission
+#         if is_submit and user_id:
+#             cur.execute("""
+#                 INSERT INTO user_answers (user_id, question_id, user_query, is_correct)
+#                 VALUES (%s, %s, %s, %s)
+#             """, (user_id, question_id, user_query, is_correct))
+#             conn.commit()
+
+#         return jsonify({
+#             "message": "Query executed successfully" if not is_submit else "Answer submitted successfully",
+#             "is_correct": is_correct,
+#             "user_query_result": user_result,
+#             "correct_query_result": correct_result
+#         }), 201
+
+#     except Exception as e:
+#         return jsonify({"error": str(e)}), 500
+
+#     finally:
+#         if conn:
+#             conn.close()  # ✅ Always close DB connection
 
 
 @app.route("/run-answer", methods=["POST"])
