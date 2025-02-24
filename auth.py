@@ -18,6 +18,11 @@ app.config["JWT_ACCESS_COOKIE_NAME"] = "access_token"  # The cookie storing the 
 app.config["JWT_REFRESH_COOKIE_NAME"] = "refresh_token"  # The cookie storing the refresh token
 app.config["JWT_COOKIE_CSRF_PROTECT"] = False 
 
+app.config.update(
+    SESSION_COOKIE_SAMESITE="None",  # Allows cross-site cookies
+    SESSION_COOKIE_SECURE=True,      # Required for SameSite=None
+)
+
 jwt = JWTManager(app)
 
 bcrypt = Bcrypt(app)
