@@ -502,6 +502,45 @@ def get_submissions():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+
+@app.route("/leaderboard", methods=["GET"])
+@jwt_required()
+def get_leaderboard():
+    user_id = get_jwt_identity()
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Fetch top 10 users by XP
+        cur.execute("""
+            SELECT username, xp FROM users 
+            ORDER BY xp DESC 
+            LIMIT 10;
+        """)
+        top_users = cur.fetchall()
+
+        # Fetch logged-in user's rank if not in top 10
+        cur.execute("""
+            SELECT username, xp, 
+            RANK() OVER (ORDER BY xp DESC) AS rank
+            FROM users WHERE id = %s;
+        """, (user_id,))
+        user_rank = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        # Format response
+        return jsonify({
+            "leaderboard": [{"username": user[0], "xp": user[1]} for user in top_users],
+            "user_rank": {"username": user_rank[0], "xp": user_rank[1], "rank": user_rank[2]} if user_rank else None
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/challenges", methods=["GET"])
 def get_challenges():
