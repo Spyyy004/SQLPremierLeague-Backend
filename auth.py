@@ -216,8 +216,8 @@ def get_profile():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Fetch user details
-        cur.execute("SELECT username, email FROM users WHERE id = %s;", (user_id,))
+        # Fetch user details and XP
+        cur.execute("SELECT username, email, xp FROM users WHERE id = %s;", (user_id,))
         user = cur.fetchone()
 
         if not user:
@@ -238,6 +238,7 @@ def get_profile():
         return jsonify({
             "username": user[0],
             "email": user[1],
+            "xp": user[2],  # Include XP in response
             "total_submissions": stats[0],
             "correct_submissions": stats[1],
             "unique_questions_solved": stats[2]
@@ -343,11 +344,35 @@ def submit_answer():
                     "correct_query_result": correct_result
                 }), 200
 
-            # ✅ Otherwise, insert the new submission
+            # Initialize XP award
+            xp_award = 0
+            if is_correct:
+                # Fetch the question's difficulty (type) to determine XP
+                cur.execute("SELECT type FROM questions WHERE id = %s;", (question_id,))
+                question_type_row = cur.fetchone()
+                if question_type_row:
+                    question_type = question_type_row[0].lower()
+                    if question_type == "easy":
+                        xp_award = 50
+                    elif question_type == "medium":
+                        xp_award = 100
+                    elif question_type == "hard":
+                        xp_award = 200
+
+            # ✅ Insert the new submission
             cur.execute("""
                 INSERT INTO user_answers (user_id, question_id, user_query, is_correct)
                 VALUES (%s, %s, %s, %s)
             """, (user_id, question_id, user_query, is_correct))
+            
+            # Update the user's XP if the submission is correct and XP award is applicable
+            if is_correct and xp_award > 0:
+                cur.execute("""
+                    UPDATE users 
+                    SET xp = xp + %s 
+                    WHERE id = %s;
+                """, (xp_award, user_id))
+            
             conn.commit()
 
         return jsonify({
