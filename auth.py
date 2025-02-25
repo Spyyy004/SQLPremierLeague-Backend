@@ -543,20 +543,30 @@ def get_challenges():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Fetch questions from the database
-        cur.execute("""
-            SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
-            FROM questions q
-            LEFT JOIN user_answers ua ON q.id = ua.question_id
-            GROUP BY q.id;
-        """)
+        # Get the category parameter from the query string (if provided)
+        category = request.args.get("category")
+        if category:
+            # Filter challenges by the provided category
+            cur.execute("""
+                SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
+                FROM questions q
+                LEFT JOIN user_answers ua ON q.id = ua.question_id
+                WHERE q.category = %s
+                GROUP BY q.id;
+            """, (category,))
+        else:
+            cur.execute("""
+                SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
+                FROM questions q
+                LEFT JOIN user_answers ua ON q.id = ua.question_id
+                GROUP BY q.id;
+            """)
         challenges = cur.fetchall()
         cur.close()
         conn.close()
 
-        # Convert to JSON format
         challenge_list = [
-            {"id": q[0], "question": q[1], "type": q[2],"submissions":q[3]} for q in challenges
+            {"id": q[0], "question": q[1], "type": q[2], "submissions": q[3]} for q in challenges
         ]
         
         return jsonify({"challenges": challenge_list}), 200
