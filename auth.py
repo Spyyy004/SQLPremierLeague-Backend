@@ -141,6 +141,26 @@ def is_safe_query(query):
 
     return True  # ✅ Query is safe to execute
 
+@app.route('/logout', methods=['POST'])
+def logout():
+    response = make_response(jsonify({"message": "Logged out successfully"}))
+    # Clear the access token cookie
+    response.set_cookie(
+        "access_token", value="", expires=0,
+        httponly=True, secure=True, samesite="None"
+    )
+    # Clear the refresh token cookie
+    response.set_cookie(
+        "refresh_token", value="", expires=0,
+        httponly=True, secure=True, samesite="None"
+    )
+    # Optionally clear the CSRF token cookie if you're managing it client-side
+    response.set_cookie(
+        "csrf_token", value="", expires=0,
+        httponly=False, secure=True, samesite="None"
+    )
+    return response
+
 
 def generate_csrf_token():
     return secrets.token_hex(32)  # 64-character random string
