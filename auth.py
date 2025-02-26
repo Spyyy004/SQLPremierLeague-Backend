@@ -141,6 +141,31 @@ def is_safe_query(query):
 
     return True  # ✅ Query is safe to execute
 
+@app.route("/categories", methods=["GET"])
+def get_categories():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # ✅ Fetch categories and count of questions for each category
+        cur.execute("""
+            SELECT category, COUNT(*) AS question_count 
+            FROM questions 
+            GROUP BY category;
+        """)
+        
+        categories = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        # ✅ Format response
+        category_list = [{"category": row[0], "question_count": row[1]} for row in categories]
+
+        return jsonify({"categories": category_list}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/logout', methods=['POST'])
 def logout():
     response = make_response(jsonify({"message": "Logged out successfully"}))
