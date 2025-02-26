@@ -6,6 +6,7 @@ import os
 from flask_cors import CORS
 import secrets
 import re
+from datetime import time
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -44,6 +45,8 @@ def get_db_connection():
     )
 
 
+
+
 @app.route("/problem/<int:problem_id>", methods=["GET"])
 def get_problem(problem_id):
     """Fetch a single problem along with the correct schema for either EPL or Cricket tables."""
@@ -76,8 +79,11 @@ def get_problem(problem_id):
         for table in tables:
             try:
                 # Fetch column names
-                cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = %s ORDER BY ordinal_position;", (table,))
-                columns = [row[0] for row in cur.fetchall()]
+                cur.execute(f"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = %s ORDER BY ordinal_position;", (table,))
+                columns_info = cur.fetchall()
+                
+                columns = [col[0] for col in columns_info]
+                column_types = {col[0]: col[1] for col in columns_info}  # Store column types
 
                 if not columns:
                     raise Exception(f"Table '{table}' has no columns or does not exist.")
@@ -86,9 +92,20 @@ def get_problem(problem_id):
                 cur.execute(f"SELECT {', '.join(columns)} FROM {table} LIMIT 3;")
                 rows = cur.fetchall()
 
+                # ✅ Convert TIME columns to string format
+                formatted_rows = []
+                for row in rows:
+                    formatted_row = []
+                    for col_name, value in zip(columns, row):
+                        if isinstance(value, time):  # Convert TIME columns to string
+                            formatted_row.append(value.strftime("%H:%M:%S"))
+                        else:
+                            formatted_row.append(value)
+                    formatted_rows.append(formatted_row)
+
                 table_data[table] = {
                     "columns": columns,
-                    "sample_data": rows
+                    "sample_data": formatted_rows  # Ensures proper data alignment
                 }
             except Exception as table_error:
                 return jsonify({"error": f"Failed fetching data for table {table}: {str(table_error)}"}), 500
