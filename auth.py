@@ -66,7 +66,7 @@ def get_problem(problem_id):
 
         # ✅ Determine which tables to return based on category
         if category.lower() == "epl":
-            tables = ["epl_matches"]
+            tables = ["epl_matches", "epl_statistics"]
         elif category.lower() == "cricket":
             tables = ["matches", "deliveries"]
         else:
