@@ -97,7 +97,7 @@ def get_problem(problem_id):
                 for row in rows:
                     formatted_row = []
                     for col_name, value in zip(columns, row):
-                        if isinstance(value, time):  # Convert TIME columns to string
+                        if table == "epl_matches" and column_types[col_name] == "time":  # Convert TIME columns to string
                             formatted_row.append(value.strftime("%H:%M:%S"))
                         else:
                             formatted_row.append(value)
