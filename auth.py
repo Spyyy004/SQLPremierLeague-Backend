@@ -47,54 +47,66 @@ def get_db_connection():
 @app.route("/problem/<int:problem_id>", methods=["GET"])
 def get_problem(problem_id):
     """Fetch a single problem along with the correct schema for either EPL or Cricket tables."""
-    conn = get_db_connection()
-    cur = conn.cursor()
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
 
-    # ✅ Fetch problem details including category
-    cur.execute("SELECT id, question, type, category FROM questions WHERE id = %s;", (problem_id,))
-    problem = cur.fetchone()
+        # ✅ Fetch problem details including category
+        cur.execute("SELECT id, question, type, category FROM questions WHERE id = %s;", (problem_id,))
+        problem = cur.fetchone()
 
-    if not problem:
+        if not problem:
+            conn.close()
+            return jsonify({"error": "Problem not found"}), 404
+
+        problem_id, question, type_, category = problem
+
+        # ✅ Determine which tables to return based on category
+        if category.lower() == "epl":
+            tables = ["epl_matches"]
+        elif category.lower() == "cricket":
+            tables = ["matches", "deliveries"]
+        else:
+            conn.close()
+            return jsonify({"error": "Invalid category"}), 400
+
+        table_data = {}
+
+        # ✅ Fetch table schema and sample rows dynamically
+        for table in tables:
+            try:
+                # Fetch column names
+                cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = %s ORDER BY ordinal_position;", (table,))
+                columns = [row[0] for row in cur.fetchall()]
+
+                if not columns:
+                    raise Exception(f"Table '{table}' has no columns or does not exist.")
+
+                # Fetch sample data
+                cur.execute(f"SELECT {', '.join(columns)} FROM {table} LIMIT 3;")
+                rows = cur.fetchall()
+
+                table_data[table] = {
+                    "columns": columns,
+                    "sample_data": rows
+                }
+            except Exception as table_error:
+                return jsonify({"error": f"Failed fetching data for table {table}: {str(table_error)}"}), 500
+
         conn.close()
-        return jsonify({"error": "Problem not found"}), 404
 
-    problem_id, question, type_, category = problem
+        return jsonify({
+            "problem": {
+                "id": problem_id,
+                "question": question,
+                "type": type_,
+                "category": category
+            },
+            "tables": table_data
+        })
 
-    # ✅ Determine which tables to return based on category
-    if category.lower() == "epl":
-        tables = ["epl_matches"]
-    elif category.lower() == "cricket":
-        tables = ["matches", "deliveries"]
-    else:
-        conn.close()
-        return jsonify({"error": "Invalid category"}), 400
-
-    table_data = {}
-
-    # ✅ Fetch table schema and sample rows dynamically
-    for table in tables:
-        cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}' ORDER BY ordinal_position;")
-        columns = [row[0] for row in cur.fetchall()]
-
-        cur.execute(f"SELECT {', '.join(columns)} FROM {table} LIMIT 3;")  # Ensures correct column order
-        rows = cur.fetchall()
-
-        table_data[table] = {
-            "columns": columns,
-            "sample_data": rows  # Ensures proper data alignment
-        }
-
-    conn.close()
-
-    return jsonify({
-        "problem": {
-            "id": problem_id,
-            "question": question,
-            "type": type_,
-            "category": category
-        },
-        "tables": table_data
-    })
+    except Exception as e:
+        return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
 # ✅ User Registration (Signup)
 @app.route("/register", methods=["POST"])
