@@ -46,32 +46,23 @@ def get_db_connection():
 
 @app.route("/problem/<int:problem_id>", methods=["GET"])
 def get_problem(problem_id):
-    """Fetch a single problem along with the correct schema for either EPL or Cricket tables."""
+    """Fetch a single problem along with correct schema of matches and deliveries tables."""
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # ✅ Fetch problem details including category
-    cur.execute("SELECT id, question, type, category FROM questions WHERE id = %s;", (problem_id,))
+    # Fetch problem details
+    cur.execute("SELECT id, question, type FROM questions WHERE id = %s;", (problem_id,))
     problem = cur.fetchone()
 
     if not problem:
         conn.close()
         return jsonify({"error": "Problem not found"}), 404
 
-    problem_id, question, type_, category = problem
-
-    # ✅ Determine which tables to return based on category
-    if category.lower() == "epl":
-        tables = ["epl_matches"]
-    elif category.lower() == "cricket":
-        tables = ["matches", "deliveries"]
-    else:
-        conn.close()
-        return jsonify({"error": "Invalid category"}), 400
-
+    # Define tables we want to return
+    tables = ["matches", "deliveries"]
     table_data = {}
 
-    # ✅ Fetch table schema and sample rows dynamically
+    # Fetch table columns in correct order & fetch sample rows
     for table in tables:
         cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}' ORDER BY ordinal_position;")
         columns = [row[0] for row in cur.fetchall()]
@@ -81,17 +72,16 @@ def get_problem(problem_id):
 
         table_data[table] = {
             "columns": columns,
-            "sample_data": rows  # Ensures proper data alignment
+            "sample_data": rows  # This now aligns correctly
         }
 
     conn.close()
 
     return jsonify({
         "problem": {
-            "id": problem_id,
-            "question": question,
-            "type": type_,
-            "category": category
+            "id": problem[0],
+            "question": problem[1],
+            "type": problem[2],
         },
         "tables": table_data
     })
