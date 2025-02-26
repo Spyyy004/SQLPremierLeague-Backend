@@ -78,10 +78,15 @@ def get_problem(problem_id):
         # ✅ Fetch table schema and sample rows dynamically
         for table in tables:
             try:
-                # Fetch column names
-                cur.execute(f"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = %s ORDER BY ordinal_position;", (table,))
-                columns_info = cur.fetchall()
+                # Fetch column names & data types
+                cur.execute("""
+                    SELECT column_name, data_type 
+                    FROM information_schema.columns 
+                    WHERE table_name = %s 
+                    ORDER BY ordinal_position;
+                """, (table,))
                 
+                columns_info = cur.fetchall()
                 columns = [col[0] for col in columns_info]
                 column_types = {col[0]: col[1] for col in columns_info}  # Store column types
 
@@ -92,13 +97,13 @@ def get_problem(problem_id):
                 cur.execute(f"SELECT {', '.join(columns)} FROM {table} LIMIT 3;")
                 rows = cur.fetchall()
 
-                # ✅ Convert TIME columns to string format
+                # ✅ Convert TIME columns to string format (ONLY for epl_matches)
                 formatted_rows = []
                 for row in rows:
                     formatted_row = []
                     for col_name, value in zip(columns, row):
-                        if table == "epl_matches" and column_types[col_name] == "time":  # Convert TIME columns to string
-                            formatted_row.append(value.strftime("%H:%M:%S"))
+                        if table == "epl_matches" and column_types[col_name] == "time":  
+                            formatted_row.append(value.strftime("%H:%M:%S") if value else None)
                         else:
                             formatted_row.append(value)
                     formatted_rows.append(formatted_row)
@@ -125,8 +130,7 @@ def get_problem(problem_id):
     except Exception as e:
         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
-# ✅ User Registration (Signup)
-@app.route("/register", methods=["POST"])
+
 def register():
     data = request.get_json()
     username = data.get("username")
