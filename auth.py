@@ -603,7 +603,7 @@ def get_challenges():
             cur.execute("""
                 SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
                 FROM questions q
-                LEFT JOIN user_answers ua ON q.id = ua.question_id
+                LEFT JOIN user_answers ua ON q.id = ua.question_id WHERE q.category = 'cricket'
                 GROUP BY q.id;
             """)
         challenges = cur.fetchall()
