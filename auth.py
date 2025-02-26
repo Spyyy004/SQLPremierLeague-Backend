@@ -5,6 +5,7 @@ import psycopg2
 import os
 from flask_cors import CORS
 import secrets
+from datetime import time
 import re
 from datetime import time
 
@@ -97,12 +98,12 @@ def get_problem(problem_id):
                 cur.execute(f"SELECT {', '.join(columns)} FROM {table} LIMIT 3;")
                 rows = cur.fetchall()
 
-                # ✅ Convert TIME columns to string format (ONLY for epl_matches)
+                # ✅ Convert TIME columns to string format for all tables
                 formatted_rows = []
                 for row in rows:
                     formatted_row = []
                     for col_name, value in zip(columns, row):
-                        if table == "epl_matches" and column_types[col_name] == "time":  
+                        if isinstance(value, time):  # Convert TIME values to string
                             formatted_row.append(value.strftime("%H:%M:%S") if value else None)
                         else:
                             formatted_row.append(value)
