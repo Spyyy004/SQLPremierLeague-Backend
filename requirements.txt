@@ -4,3 +4,4 @@ flask-jwt-extended
 psycopg2-binary
 gunicorn
 flask_cors
+sql-metadat
