@@ -47,43 +47,56 @@ def get_db_connection():
 @app.route("/challenge-of-the-day", methods=["GET"])
 def challenge_of_the_day():
     conn = get_db_connection()
-    cur = conn.cursor()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
 
-    # ✅ Get today's date
-    today = datetime.date.today()
+    try:
+        cur = conn.cursor()
+        today = datetime.date.today()
 
-    # ✅ Check if a challenge is already set for today
-    cur.execute("SELECT challenge_id FROM daily_challenge WHERE challenge_date = %s;", (today,))
-    challenge = cur.fetchone()
+        # ✅ Check if today's challenge is already set
+        cur.execute("SELECT challenge_id FROM daily_challenge WHERE challenge_date = %s;", (today,))
+        challenge = cur.fetchone()
 
-    if challenge:
-        challenge_id = challenge[0]
-    else:
-        # ✅ Get yesterday’s challenge to avoid repetition
-        cur.execute("SELECT challenge_id FROM daily_challenge WHERE challenge_date = %s;", (today - datetime.timedelta(days=1),))
-        yesterday_challenge = cur.fetchone()
-        yesterday_id = yesterday_challenge[0] if yesterday_challenge else None
+        if challenge:
+            challenge_id = challenge[0]
+        else:
+            # ✅ Get yesterday’s challenge to ensure a new one is selected
+            cur.execute("SELECT challenge_id FROM daily_challenge WHERE challenge_date = %s;", (today - datetime.timedelta(days=1),))
+            yesterday_challenge = cur.fetchone()
+            yesterday_id = yesterday_challenge[0] if yesterday_challenge else None
 
-        # ✅ Select a new challenge that is NOT yesterday’s challenge
-        cur.execute("SELECT id FROM questions WHERE id != %s ORDER BY RANDOM() LIMIT 1;", (yesterday_id,))
-        challenge_id = cur.fetchone()[0]
+            # ✅ Fix: Use `COALESCE(NULL, -1)` to prevent NULL issues
+            cur.execute("SELECT id FROM questions WHERE id != COALESCE(%s, -1) ORDER BY RANDOM() LIMIT 1;", (yesterday_id,))
+            challenge_data = cur.fetchone()
 
-        # ✅ Store today's challenge
-        cur.execute("INSERT INTO daily_challenge (challenge_date, challenge_id) VALUES (%s, %s);", (today, challenge_id))
-        conn.commit()
+            if not challenge_data:
+                return jsonify({"error": "No available challenges"}), 404
 
-    # ✅ Fetch challenge details
-    cur.execute("SELECT id, question, type, category FROM questions WHERE id = %s;", (challenge_id,))
-    challenge_data = cur.fetchone()
+            challenge_id = challenge_data[0]
 
-    conn.close()
+            # ✅ Insert today’s challenge
+            cur.execute("INSERT INTO daily_challenge (challenge_date, challenge_id) VALUES (%s, %s);", (today, challenge_id))
+            conn.commit()
 
-    return jsonify({
-        "id": challenge_data[0],
-        "question": challenge_data[1],
-        "type": challenge_data[2],
-        "category": challenge_data[3]
-    })
+        # ✅ Fetch challenge details
+        cur.execute("SELECT id, question, type, category FROM questions WHERE id = %s;", (challenge_id,))
+        challenge_data = cur.fetchone()
+        conn.close()
+
+        if not challenge_data:
+            return jsonify({"error": "Challenge not found"}), 404
+
+        return jsonify({
+            "id": challenge_data[0],
+            "question": challenge_data[1],
+            "type": challenge_data[2],
+            "category": challenge_data[3]
+        })
+
+    except Exception as e:
+        print("❌ API Error:", str(e))
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
 
 
 @app.route("/problem/<int:problem_id>", methods=["GET"])
