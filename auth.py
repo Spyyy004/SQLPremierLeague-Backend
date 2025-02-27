@@ -8,6 +8,7 @@ import secrets
 from datetime import time
 import re
 from datetime import time
+from sql_metadata import Parser
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -44,41 +45,37 @@ def get_db_connection():
 
 
 
-
 @app.route("/problem/<int:problem_id>", methods=["GET"])
 def get_problem(problem_id):
-    """Fetch a single problem along with the correct schema for either EPL or Cricket tables."""
+    """Fetch problem details and return only the necessary tables used in the correct_query."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # ✅ Fetch problem details including category
-        cur.execute("SELECT id, question, type, category FROM questions WHERE id = %s;", (problem_id,))
+        # ✅ Fetch problem details along with the correct query
+        cur.execute("SELECT id, question, type, category, correct_query FROM questions WHERE id = %s;", (problem_id,))
         problem = cur.fetchone()
 
         if not problem:
             conn.close()
             return jsonify({"error": "Problem not found"}), 404
 
-        problem_id, question, type_, category = problem
+        problem_id, question, type_, category, correct_query = problem
 
-        # ✅ Determine which tables to return based on category
-        if category.lower() == "epl":
-            tables = ["epl_matches", "epl_statistics"]
-        elif category.lower() == "cricket":
-            tables = ["matches", "deliveries"]
-        elif category.lower() == "f1":
-            tables = ["f1_races", "f1_constructor_standings","f1_constructors","f1_driver_standings","f1_drivers","f1_results","f1_circuits"]
-        else:
-            conn.close()
-            return jsonify({"error": "Invalid category"}), 400
+        if not correct_query:
+            return jsonify({"error": "No correct query found for this problem"}), 400
+
+        # ✅ Extract table names dynamically from the correct SQL query
+        required_tables = extract_table_names(correct_query)
+
+        if not required_tables:
+            return jsonify({"error": "No tables detected in correct query"}), 400
 
         table_data = {}
 
-        # ✅ Fetch table schema and sample rows dynamically
-        for table in tables:
+        for table in required_tables:
             try:
-                # Fetch column names & data types
+                # ✅ Fetch column names & data types
                 cur.execute("""
                     SELECT column_name, data_type 
                     FROM information_schema.columns 
@@ -88,47 +85,133 @@ def get_problem(problem_id):
                 
                 columns_info = cur.fetchall()
                 columns = [col[0] for col in columns_info]
-                column_types = {col[0]: col[1] for col in columns_info}  # Store column types
 
                 if not columns:
                     raise Exception(f"Table '{table}' has no columns or does not exist.")
 
-                # Fetch sample data
+                # ✅ Fetch sample data (limit 3 rows)
                 cur.execute(f"SELECT {', '.join(columns)} FROM {table} LIMIT 3;")
                 rows = cur.fetchall()
 
-                # ✅ Convert TIME columns to string format for all tables
-                formatted_rows = []
-                for row in rows:
-                    formatted_row = []
-                    for col_name, value in zip(columns, row):
-                        if isinstance(value, time):  # Convert TIME values to string
-                            formatted_row.append(value.strftime("%H:%M:%S") if value else None)
-                        else:
-                            formatted_row.append(value)
-                    formatted_rows.append(formatted_row)
+                # ✅ Convert TIME columns to string format
+                formatted_rows = [
+                    [value.strftime("%H:%M:%S") if isinstance(value, time) else value for value in row]
+                    for row in rows
+                ]
 
-                table_data[table] = {
-                    "columns": columns,
-                    "sample_data": formatted_rows  # Ensures proper data alignment
-                }
+                table_data[table] = {"columns": columns, "sample_data": formatted_rows}
+
             except Exception as table_error:
                 return jsonify({"error": f"Failed fetching data for table {table}: {str(table_error)}"}), 500
 
         conn.close()
 
         return jsonify({
-            "problem": {
-                "id": problem_id,
-                "question": question,
-                "type": type_,
-                "category": category
-            },
+            "problem": {"id": problem_id, "question": question, "type": type_, "category": category},
             "tables": table_data
         })
 
     except Exception as e:
         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
+
+
+# @app.route("/problem/<int:problem_id>", methods=["GET"])
+# def get_problem(problem_id):
+#     """Fetch a single problem along with the correct schema for either EPL or Cricket tables."""
+#     try:
+#         conn = get_db_connection()
+#         cur = conn.cursor()
+
+#         # ✅ Fetch problem details including category
+#         cur.execute("SELECT id, question, type, category FROM questions WHERE id = %s;", (problem_id,))
+#         problem = cur.fetchone()
+
+#         if not problem:
+#             conn.close()
+#             return jsonify({"error": "Problem not found"}), 404
+
+#         problem_id, question, type_, category = problem
+
+#         # ✅ Determine which tables to return based on category
+#         if category.lower() == "epl":
+#             tables = ["epl_matches", "epl_statistics"]
+#         elif category.lower() == "cricket":
+#             tables = ["matches", "deliveries"]
+#         elif category.lower() == "f1":
+#             tables = ["f1_races", "f1_constructor_standings","f1_constructors","f1_driver_standings","f1_drivers","f1_results","f1_circuits"]
+#         else:
+#             conn.close()
+#             return jsonify({"error": "Invalid category"}), 400
+
+#         table_data = {}
+
+#         # ✅ Fetch table schema and sample rows dynamically
+#         for table in tables:
+#             try:
+#                 # Fetch column names & data types
+#                 cur.execute("""
+#                     SELECT column_name, data_type 
+#                     FROM information_schema.columns 
+#                     WHERE table_name = %s 
+#                     ORDER BY ordinal_position;
+#                 """, (table,))
+                
+#                 columns_info = cur.fetchall()
+#                 columns = [col[0] for col in columns_info]
+#                 column_types = {col[0]: col[1] for col in columns_info}  # Store column types
+
+#                 if not columns:
+#                     raise Exception(f"Table '{table}' has no columns or does not exist.")
+
+#                 # Fetch sample data
+#                 cur.execute(f"SELECT {', '.join(columns)} FROM {table} LIMIT 3;")
+#                 rows = cur.fetchall()
+
+#                 # ✅ Convert TIME columns to string format for all tables
+#                 formatted_rows = []
+#                 for row in rows:
+#                     formatted_row = []
+#                     for col_name, value in zip(columns, row):
+#                         if isinstance(value, time):  # Convert TIME values to string
+#                             formatted_row.append(value.strftime("%H:%M:%S") if value else None)
+#                         else:
+#                             formatted_row.append(value)
+#                     formatted_rows.append(formatted_row)
+
+#                 table_data[table] = {
+#                     "columns": columns,
+#                     "sample_data": formatted_rows  # Ensures proper data alignment
+#                 }
+#             except Exception as table_error:
+#                 return jsonify({"error": f"Failed fetching data for table {table}: {str(table_error)}"}), 500
+
+#         conn.close()
+
+#         return jsonify({
+#             "problem": {
+#                 "id": problem_id,
+#                 "question": question,
+#                 "type": type_,
+#                 "category": category
+#             },
+#             "tables": table_data
+#         })
+
+#     except Exception as e:
+#         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
+    
+def extract_table_names(sql_query):
+    """
+    Extracts table names from SQL queries safely using `sql_metadata`.
+    - Handles JOINs, subqueries, CTEs, and aliases.
+    """
+    try:
+        parser = Parser(sql_query)
+        tables = parser.tables
+        return list(tables)  # Convert to list for JSON response
+    except Exception as e:
+        print(f"Error extracting tables: {str(e)}")
+        return []
 
 @app.route("/edit-profile", methods=["PUT"])
 @jwt_required()  # Requires user authentication
