@@ -6,6 +6,7 @@ import os
 from flask_cors import CORS
 import secrets
 from datetime import time
+import datetime
 import re
 from datetime import time
 from sql_metadata import Parser
@@ -43,6 +44,46 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
+@app.route("/challenge-of-the-day", methods=["GET"])
+def challenge_of_the_day():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # ✅ Get today's date
+    today = datetime.date.today()
+
+    # ✅ Check if a challenge is already set for today
+    cur.execute("SELECT challenge_id FROM daily_challenge WHERE challenge_date = %s;", (today,))
+    challenge = cur.fetchone()
+
+    if challenge:
+        challenge_id = challenge[0]
+    else:
+        # ✅ Get yesterday’s challenge to avoid repetition
+        cur.execute("SELECT challenge_id FROM daily_challenge WHERE challenge_date = %s;", (today - datetime.timedelta(days=1),))
+        yesterday_challenge = cur.fetchone()
+        yesterday_id = yesterday_challenge[0] if yesterday_challenge else None
+
+        # ✅ Select a new challenge that is NOT yesterday’s challenge
+        cur.execute("SELECT id FROM questions WHERE id != %s ORDER BY RANDOM() LIMIT 1;", (yesterday_id,))
+        challenge_id = cur.fetchone()[0]
+
+        # ✅ Store today's challenge
+        cur.execute("INSERT INTO daily_challenge (challenge_date, challenge_id) VALUES (%s, %s);", (today, challenge_id))
+        conn.commit()
+
+    # ✅ Fetch challenge details
+    cur.execute("SELECT id, question, type, category FROM questions WHERE id = %s;", (challenge_id,))
+    challenge_data = cur.fetchone()
+
+    conn.close()
+
+    return jsonify({
+        "id": challenge_data[0],
+        "question": challenge_data[1],
+        "type": challenge_data[2],
+        "category": challenge_data[3]
+    })
 
 
 @app.route("/problem/<int:problem_id>", methods=["GET"])
