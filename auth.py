@@ -132,6 +132,7 @@ def get_problem(problem_id):
         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
 
+@app.route("/register",methods=["POST"])
 def register():
     data = request.get_json()
     username = data.get("username")
