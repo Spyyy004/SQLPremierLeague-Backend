@@ -41,9 +41,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
-    return psycopg2.connect(
-        database=DB_NAME, user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port=DB_PORT
-    )
 
 
 
@@ -70,6 +67,8 @@ def get_problem(problem_id):
             tables = ["epl_matches", "epl_statistics"]
         elif category.lower() == "cricket":
             tables = ["matches", "deliveries"]
+        elif category.lower() == "f1":
+            tables = ["f1_races", "f1_constructor_standings","f1_constructors","f1_driver_standings","f1_drivers","f1_results","f1_circuits"]
         else:
             conn.close()
             return jsonify({"error": "Invalid category"}), 400
