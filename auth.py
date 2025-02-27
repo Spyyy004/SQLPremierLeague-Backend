@@ -131,6 +131,55 @@ def get_problem(problem_id):
     except Exception as e:
         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
+@app.route("/edit-profile", methods=["PUT"])
+@jwt_required()  # Requires user authentication
+def edit_profile():
+    user_id = get_jwt_identity()  # Get the authenticated user's ID
+    data = request.get_json()
+
+    new_username = data.get("username")
+    new_password = data.get("password")
+
+    if not new_username and not new_password:
+        return jsonify({"error": "At least one field (username or password) must be provided"}), 400
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # ✅ If updating username, check if it's already taken
+        if new_username:
+            cur.execute("SELECT id FROM users WHERE username = %s AND id != %s;", (new_username, user_id))
+            if cur.fetchone():
+                return jsonify({"error": "Username already taken"}), 409  # Conflict
+
+        # ✅ Update fields dynamically
+        update_fields = []
+        values = []
+
+        if new_username:
+            update_fields.append("username = %s")
+            values.append(new_username)
+
+        if new_password:
+            hashed_password = bcrypt.generate_password_hash(new_password).decode("utf-8")
+            update_fields.append("password_hash = %s")
+            values.append(hashed_password)
+
+        values.append(user_id)  # Add user_id for WHERE condition
+
+        query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s RETURNING username;"
+        cur.execute(query, tuple(values))
+        updated_user = cur.fetchone()
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"message": "Profile updated successfully", "username": updated_user[0]}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500  # Internal Server Error
 
 @app.route("/register",methods=["POST"])
 def register():
