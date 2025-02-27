@@ -11,7 +11,7 @@ from datetime import time
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
+CORS(app, supports_credentials=True,resources={r"/*": {"origins": ["https://sqlpremierleague.com", "http://localhost:3000"]}})
 app.config["JWT_SECRET_KEY"] = "supersecretkey"  # Change this in production!
 
 app.config["JWT_TOKEN_LOCATION"] = ["cookies"]  # ✅ Look for JWTs in cookies instead of headers
