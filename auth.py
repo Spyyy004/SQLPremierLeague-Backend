@@ -549,17 +549,16 @@ def get_csrf_token():
 @app.route("/submit-answer", methods=["POST"])
 @jwt_required()
 def submit_answer():
-        
     csrf_token_cookie = request.cookies.get("csrf_token")
     csrf_token_header = request.headers.get("X-CSRF-Token")
 
     if not csrf_token_cookie or not csrf_token_header or csrf_token_cookie != csrf_token_header:
-        return jsonify({"error": "CSRF token mismatch"}), 403  # 🚨 CSRF validation failed
+        return jsonify({"error": "CSRF token mismatch"}), 403
 
     data = request.get_json()
     question_id = data.get("question_id")
     user_query = data.get("user_query")
-    is_submit = data.get("is_submit", False)  # Submission check
+    is_submit = data.get("is_submit", False)
 
     if not is_safe_query(user_query):
         return jsonify({"error": "Unsafe SQL query detected!"}), 400
@@ -569,7 +568,6 @@ def submit_answer():
 
     user_id = None
     if is_submit:
-        # ✅ Ensure User is Authenticated for Submissions
         try:
             user_id = get_jwt_identity()
             if not user_id:
@@ -577,7 +575,7 @@ def submit_answer():
         except Exception as e:
             return jsonify({"error": "JWT Invalid", "details": str(e)}), 401
 
-    conn = None  # Initialize connection
+    conn = None  
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -585,66 +583,65 @@ def submit_answer():
         # ✅ Fetch correct query from DB
         cur.execute("SELECT correct_query FROM questions WHERE id = %s;", (question_id,))
         correct_query = cur.fetchone()
-
         if not correct_query:
             return jsonify({"error": "Invalid question ID"}), 400
         correct_query = correct_query[0]
 
-        # ✅ Execute correct query
+        # ✅ Execute correct query & measure time
+        start_time = timer.time()
         cur.execute(correct_query)
         correct_result = cur.fetchall()
+        correct_execution_time = round((timer.time() - start_time) * 1000, 2)  # ✅ Convert to ms
 
-        # ✅ Execute user's SQL query
+        # ✅ Execute user query & measure time
         try:
+            start_time = timer.time()
             cur.execute(user_query)
             user_result = cur.fetchall()
+            user_execution_time = round((timer.time() - start_time) * 1000, 2)  # ✅ Convert to ms
         except Exception as e:
             return jsonify({
                 "error": "Invalid SQL query",
                 "details": str(e),
                 "user_query_result": None,
-                "correct_query_result": correct_result
+                "correct_query_result": correct_result,
+                "user_execution_time": None,
+                "correct_execution_time": correct_execution_time
             }), 400
 
         # ✅ Compare results
         is_correct = user_result == correct_result
 
         xp_award = 0
+        is_repeat = False
+
         if is_submit and user_id:
-            # Check if the user has already solved this problem correctly
+            # ✅ Check if user has already solved this problem correctly
             cur.execute("""
                 SELECT COUNT(*) FROM user_answers 
                 WHERE user_id = %s AND question_id = %s AND is_correct = TRUE;
             """, (user_id, question_id))
             correct_count = cur.fetchone()[0]
+            is_repeat = correct_count > 0
 
-            # Award XP only if correct and this is the first correct submission.
-            if is_correct and correct_count == 0:
+            # ✅ Award XP only for first correct submission
+            if is_correct and not is_repeat:
                 cur.execute("SELECT type FROM questions WHERE id = %s;", (question_id,))
                 question_type_row = cur.fetchone()
                 if question_type_row:
                     question_type = question_type_row[0].lower()
-                    if question_type == "easy":
-                        xp_award = 50
-                    elif question_type == "medium":
-                        xp_award = 100
-                    elif question_type == "hard":
-                        xp_award = 200
+                    xp_award = {"easy": 50, "medium": 100, "hard": 200}.get(question_type, 0)
 
-            # ✅ Always insert the new submission record
+            # ✅ Always store the submission
             cur.execute("""
-                INSERT INTO user_answers (user_id, question_id, user_query, is_correct)
-                VALUES (%s, %s, %s, %s)
-            """, (user_id, question_id, user_query, is_correct))
-            
-            # Update the user's XP only if applicable
+                INSERT INTO user_answers (user_id, question_id, user_query, is_correct, execution_time)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, question_id, user_query, is_correct, user_execution_time))
+
+            # ✅ Update user XP if earned
             if is_correct and xp_award > 0:
-                cur.execute("""
-                    UPDATE users 
-                    SET xp = xp + %s 
-                    WHERE id = %s;
-                """, (xp_award, user_id))
-            
+                cur.execute("UPDATE users SET xp = xp + %s WHERE id = %s;", (xp_award, user_id))
+
             conn.commit()
 
         return jsonify({
@@ -652,7 +649,10 @@ def submit_answer():
             "is_correct": is_correct,
             "user_query_result": user_result,
             "correct_query_result": correct_result,
-            "is_repeat": (user_id is not None and is_submit and correct_count > 0)
+            "user_execution_time": user_execution_time,
+            "correct_execution_time": correct_execution_time,
+            "xp_award": xp_award,
+            "is_repeat": is_repeat
         }), 201
 
     except Exception as e:
@@ -660,7 +660,7 @@ def submit_answer():
 
     finally:
         if conn:
-            conn.close()  # ✅ Always close DB connection
+            conn.close()  # ✅ Ensure DB connection is always closed
 
 
 @app.route("/run-answer", methods=["POST"])
