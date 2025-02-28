@@ -9,6 +9,7 @@ from datetime import time
 import datetime
 import re
 from datetime import time
+import time as timer
 from sql_metadata import Parser
 
 # Initialize Flask app
@@ -663,14 +664,15 @@ def submit_answer():
 
 
 @app.route("/run-answer", methods=["POST"])
+@jwt_required()
 def run_answer():
     user_id = ""
     
     data = request.get_json()
-    
     question_id = data.get("question_id")
     user_query = data.get("user_query")
-    is_submit = data.get("is_submit", False)  # Key from frontend to check if it's a submission
+    is_submit = data.get("is_submit", False)
+
     if is_submit:
         user_id = get_jwt_identity()
     
@@ -684,26 +686,25 @@ def run_answer():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # ✅ Fetch the expected correct query from the database
+        # ✅ Fetch the correct query
         cur.execute("SELECT correct_query FROM questions WHERE id = %s;", (question_id,))
         correct_query = cur.fetchone()
-
         if not correct_query:
             return jsonify({"error": "Invalid question ID"}), 400
         correct_query = correct_query[0]
 
-        # ✅ Execute the correct query & measure time
-        start_time = time.time()
+        # ✅ Execute Correct Query & Measure Execution Time
+        start_time = timer.time()
         cur.execute(correct_query)
         correct_result = cur.fetchall()
-        correct_execution_time = round((time.time() - start_time) * 1000, 2)  # Convert to ms
+        correct_execution_time = round((timer.time() - start_time) * 1000, 2)  # ✅ Convert to ms
 
-        # ✅ Execute the user-submitted query & measure time
+        # ✅ Execute User Query & Measure Execution Time
         try:
-            start_time = time.time()
+            start_time = timer.time()
             cur.execute(user_query)
             user_result = cur.fetchall()
-            user_execution_time = round((time.time() - start_time) * 1000, 2)  # Convert to ms
+            user_execution_time = round((timer.time() - start_time) * 1000, 2)  # ✅ Convert to ms
         except Exception as e:
             return jsonify({
                 "error": "Invalid SQL query",
@@ -715,7 +716,7 @@ def run_answer():
             }), 400
 
         # ✅ Compare results
-        is_correct = user_result == correct_result  # True if answers match
+        is_correct = user_result == correct_result
 
         # ✅ Store answer if it's a submission
         if is_submit:
@@ -739,8 +740,6 @@ def run_answer():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-# ✅ Fetch User Submissions
-
 
 @app.route("/submissions", methods=["GET"])
 @jwt_required()
