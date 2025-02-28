@@ -673,6 +673,7 @@ def run_answer():
     is_submit = data.get("is_submit", False)  # Key from frontend to check if it's a submission
     if is_submit:
         user_id = get_jwt_identity()
+    
     if not question_id or not user_query:
         return jsonify({"error": "Question ID and SQL query are required"}), 400
     
@@ -683,7 +684,7 @@ def run_answer():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Fetch the expected correct query from the database
+        # ✅ Fetch the expected correct query from the database
         cur.execute("SELECT correct_query FROM questions WHERE id = %s;", (question_id,))
         correct_query = cur.fetchone()
 
@@ -691,31 +692,37 @@ def run_answer():
             return jsonify({"error": "Invalid question ID"}), 400
         correct_query = correct_query[0]
 
-        # Execute the correct query
+        # ✅ Execute the correct query & measure time
+        start_time = time.time()
         cur.execute(correct_query)
         correct_result = cur.fetchall()
+        correct_execution_time = round((time.time() - start_time) * 1000, 2)  # Convert to ms
 
-        # Execute the user-submitted query
+        # ✅ Execute the user-submitted query & measure time
         try:
+            start_time = time.time()
             cur.execute(user_query)
             user_result = cur.fetchall()
+            user_execution_time = round((time.time() - start_time) * 1000, 2)  # Convert to ms
         except Exception as e:
             return jsonify({
                 "error": "Invalid SQL query",
                 "details": str(e),
                 "user_query_result": None,
-                "correct_query_result": correct_result
+                "correct_query_result": correct_result,
+                "user_execution_time": None,
+                "correct_execution_time": correct_execution_time
             }), 400
 
-        # Compare results
+        # ✅ Compare results
         is_correct = user_result == correct_result  # True if answers match
 
-        # Only store the answer if it's a submission
+        # ✅ Store answer if it's a submission
         if is_submit:
             cur.execute("""
-                INSERT INTO user_answers (user_id, question_id, user_query, is_correct)
-                VALUES (%s, %s, %s, %s)
-            """, (user_id, question_id, user_query, is_correct))
+                INSERT INTO user_answers (user_id, question_id, user_query, is_correct, execution_time)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, question_id, user_query, is_correct, user_execution_time))
             conn.commit()
 
         cur.close()
@@ -725,13 +732,13 @@ def run_answer():
             "message": "Query executed successfully" if not is_submit else "Answer submitted successfully",
             "is_correct": is_correct,
             "user_query_result": user_result,
-            "correct_query_result": correct_result
+            "correct_query_result": correct_result,
+            "user_execution_time": user_execution_time,
+            "correct_execution_time": correct_execution_time
         }), 201
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
 # ✅ Fetch User Submissions
 
 
