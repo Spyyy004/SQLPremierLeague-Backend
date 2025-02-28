@@ -439,10 +439,11 @@ def login():
         conn.close()
 
         if user and bcrypt.check_password_hash(user[1], password):
+            user_id = str(user[0])
             access_token = create_access_token(identity=str(user[0]))  # Convert user ID to string
             refresh_token = create_refresh_token(identity=str(user[0]))
             csrf_token = generate_csrf_token()
-            response = make_response(jsonify({"message": "Login successful"}))
+            response = make_response(jsonify({"message": "Login successful","user_id":user_id}))
             response.set_cookie(
             "access_token", access_token,
             httponly=True, samesite="None", secure=True  # Secure=True for HTTPS
