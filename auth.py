@@ -885,6 +885,158 @@ def get_progress():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/discussion", methods=["POST"])
+@jwt_required()
+def create_comment():
+    data = request.get_json()
+    user_id = get_jwt_identity()
+    question_id = data.get("question_id")
+    parent_id = data.get("parent_id", None)  # Optional for replies
+    content = data.get("content")
+
+    if not question_id or not content:
+        return jsonify({"error": "Question ID and content are required"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO discussions (user_id, question_id, parent_id, content)
+        VALUES (%s, %s, %s, %s) RETURNING id, created_at;
+    """, (user_id, question_id, parent_id, content))
+    comment = cur.fetchone()
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "message": "Comment added successfully",
+        "comment_id": comment[0],
+        "created_at": comment[1]
+    }), 201
+
+@app.route("/discussion/<int:question_id>", methods=["GET"])
+def get_discussion(question_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT d.id, d.user_id, u.username, d.content, d.parent_id, d.created_at, 
+               (SELECT COUNT(*) FROM discussion_likes WHERE discussion_id = d.id) AS likes
+        FROM discussions d
+        JOIN users u ON d.user_id = u.id
+        WHERE d.question_id = %s
+        ORDER BY d.created_at ASC;
+    """, (question_id,))
+    
+    comments = cur.fetchall()
+    conn.close()
+
+    # ✅ Organize comments into a nested structure
+    comment_map = {row[0]: {
+        "id": row[0],
+        "user_id": row[1],
+        "username": row[2],
+        "content": row[3],
+        "parent_id": row[4],
+        "created_at": row[5],
+        "likes": row[6],
+        "replies": []
+    } for row in comments}
+
+    discussion = []
+    for comment in comment_map.values():
+        if comment["parent_id"]:
+            comment_map[comment["parent_id"]]["replies"].append(comment)
+        else:
+            discussion.append(comment)
+
+    return jsonify(discussion)
+
+@app.route("/discussion/like/<int:discussion_id>", methods=["POST"])
+@jwt_required()
+def like_comment(discussion_id):
+    user_id = get_jwt_identity()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # ✅ Check if user already liked the comment
+        cur.execute("SELECT id FROM discussion_likes WHERE user_id = %s AND discussion_id = %s;", 
+                    (user_id, discussion_id))
+        existing_like = cur.fetchone()
+
+        if existing_like:
+            cur.execute("DELETE FROM discussion_likes WHERE id = %s;", (existing_like[0],))
+            message = "Like removed"
+        else:
+            cur.execute("INSERT INTO discussion_likes (user_id, discussion_id) VALUES (%s, %s);",
+                        (user_id, discussion_id))
+            message = "Liked successfully"
+
+        conn.commit()
+        return jsonify({"message": message})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.route("/discussion/edit/<int:discussion_id>", methods=["PUT"])
+@jwt_required()
+def edit_comment(discussion_id):
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    new_content = data.get("content")
+
+    if not new_content:
+        return jsonify({"error": "Content cannot be empty"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE discussions SET content = %s, updated_at = NOW()
+        WHERE id = %s AND user_id = %s;
+    """, (new_content, discussion_id, user_id))
+
+    if cur.rowcount == 0:
+        return jsonify({"error": "You can only edit your own comments"}), 403
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"message": "Comment updated successfully"})
+
+
+@app.route("/discussion/delete/<int:discussion_id>", methods=["DELETE"])
+@jwt_required()
+def delete_comment(discussion_id):
+    user_id = get_jwt_identity()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # ✅ Only allow users to delete their own comments
+    cur.execute("""
+        DELETE FROM discussions WHERE id = %s AND user_id = %s;
+    """, (discussion_id, user_id))
+
+    if cur.rowcount == 0:
+        return jsonify({"error": "You can only delete your own comments"}), 403
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"message": "Comment deleted successfully"})
+
+
 # Run Flask Server
 if __name__ == "__main__":
     app.run(debug=True)
