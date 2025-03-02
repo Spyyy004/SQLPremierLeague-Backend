@@ -100,6 +100,47 @@ def challenge_of_the_day():
         return jsonify({"error": "Internal server error", "details": str(e)}), 500
 
 
+def extract_table_data(tables):
+    """
+    Fetch schema and sample data for given tables.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    table_data = {}
+
+    for table in tables:
+        try:
+            cur.execute("""
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = %s 
+                ORDER BY ordinal_position;
+            """, (table,))
+            
+            columns_info = cur.fetchall()
+            columns = [col[0] for col in columns_info]
+
+            if not columns:
+                continue  
+
+            cur.execute(f"SELECT {', '.join(columns)} FROM {table} LIMIT 3;")
+            rows = cur.fetchall()
+
+            formatted_rows = [
+                [value.strftime("%H:%M:%S") if isinstance(value, datetime.time) else value for value in row]
+                for row in rows
+            ]
+
+            table_data[table] = {"columns": columns, "sample_data": formatted_rows}
+
+        except Exception as table_error:
+            print(f"Error fetching table data for {table}: {table_error}")
+
+    cur.close()
+    conn.close()
+    return table_data
+
+
 @app.route("/problem/<int:problem_id>", methods=["GET"])
 def get_problem(problem_id):
     """Fetch problem details and return only the necessary tables used in the correct_query."""
@@ -169,92 +210,142 @@ def get_problem(problem_id):
     except Exception as e:
         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
+def fetch_question_with_schema(difficulty):
+    """
+    Fetch a random SQL question with associated table schema & sample data.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, question, type, category, correct_query
+        FROM questions WHERE type = %s ORDER BY RANDOM() LIMIT 1;
+    """, (difficulty,))
+    question = cur.fetchone()
 
-# @app.route("/problem/<int:problem_id>", methods=["GET"])
-# def get_problem(problem_id):
-#     """Fetch a single problem along with the correct schema for either EPL or Cricket tables."""
-#     try:
-#         conn = get_db_connection()
-#         cur = conn.cursor()
+    if not question:
+        return None
 
-#         # ✅ Fetch problem details including category
-#         cur.execute("SELECT id, question, type, category FROM questions WHERE id = %s;", (problem_id,))
-#         problem = cur.fetchone()
+    question_data = {
+        "id": question[0],
+        "question": question[1],
+        "type": question[2],
+        "category": question[3],
+        "correct_query": question[4],
+        "tables": {}
+    }
 
-#         if not problem:
-#             conn.close()
-#             return jsonify({"error": "Problem not found"}), 404
+    required_tables = extract_table_names(question[4])
+    question_data["tables"] = extract_table_data(required_tables)
 
-#         problem_id, question, type_, category = problem
+    cur.close()
+    conn.close()
+    return question_data
 
-#         # ✅ Determine which tables to return based on category
-#         if category.lower() == "epl":
-#             tables = ["epl_matches", "epl_statistics"]
-#         elif category.lower() == "cricket":
-#             tables = ["matches", "deliveries"]
-#         elif category.lower() == "f1":
-#             tables = ["f1_races", "f1_constructor_standings","f1_constructors","f1_driver_standings","f1_drivers","f1_results","f1_circuits"]
-#         else:
-#             conn.close()
-#             return jsonify({"error": "Invalid category"}), 400
+@app.route("/start-test", methods=["POST"])
+def start_test():
+    """
+    Start a new SQL Score Test.
+    Returns 3 questions (1 to render, 2 in queue) along with table schemas.
+    No session is stored, as test tracking happens on the frontend.
+    """
+    first_question = fetch_question_with_schema("easy")
+    if not first_question:
+        return jsonify({"error": "No questions available"}), 404
 
-#         table_data = {}
+    second_question = fetch_question_with_schema("easy")
+    third_question = fetch_question_with_schema("medium")
 
-#         # ✅ Fetch table schema and sample rows dynamically
-#         for table in tables:
-#             try:
-#                 # Fetch column names & data types
-#                 cur.execute("""
-#                     SELECT column_name, data_type 
-#                     FROM information_schema.columns 
-#                     WHERE table_name = %s 
-#                     ORDER BY ordinal_position;
-#                 """, (table,))
-                
-#                 columns_info = cur.fetchall()
-#                 columns = [col[0] for col in columns_info]
-#                 column_types = {col[0]: col[1] for col in columns_info}  # Store column types
+    return jsonify({
+        "questions": [first_question, second_question, third_question],
+    }), 200
 
-#                 if not columns:
-#                     raise Exception(f"Table '{table}' has no columns or does not exist.")
 
-#                 # Fetch sample data
-#                 cur.execute(f"SELECT {', '.join(columns)} FROM {table} LIMIT 3;")
-#                 rows = cur.fetchall()
+@app.route("/next-question", methods=["POST"])
+def next_question():
+    """
+    Returns 2 new questions with table schemas based on:
+    - Whether the last answer was correct
+    - How many total correct answers the user has given
+    - Gradual difficulty progression based on score
+    """
+    data = request.get_json()
+    test_id = data.get("test_id")  # 🔥 Ensure test_id is provided
+    answered_correctly = data.get("correct")
+    score = data.get("score")  # 🔥 Track score in the request
+    correct_answers = data.get("correct_answers")  # 🔥 Track how many correct answers
 
-#                 # ✅ Convert TIME columns to string format for all tables
-#                 formatted_rows = []
-#                 for row in rows:
-#                     formatted_row = []
-#                     for col_name, value in zip(columns, row):
-#                         if isinstance(value, time):  # Convert TIME values to string
-#                             formatted_row.append(value.strftime("%H:%M:%S") if value else None)
-#                         else:
-#                             formatted_row.append(value)
-#                     formatted_rows.append(formatted_row)
+    if not test_id:
+        return jsonify({"error": "Test ID is required"}), 400
+    if score is None or correct_answers is None:
+        return jsonify({"error": "Score and correct answers count are required"}), 400
 
-#                 table_data[table] = {
-#                     "columns": columns,
-#                     "sample_data": formatted_rows  # Ensures proper data alignment
-#                 }
-#             except Exception as table_error:
-#                 return jsonify({"error": f"Failed fetching data for table {table}: {str(table_error)}"}), 500
+    # 🔥 Adjust difficulty based on overall progress
+    if score < 10:
+        difficulty = "easy"  # 🔥 Keep showing easy questions initially
+    elif 10 <= score < 30:
+        difficulty = "medium" if answered_correctly else "easy"  # 🔥 Introduce medium questions
+    elif 30 <= score < 50:
+        difficulty = "medium" if answered_correctly else "medium"  # 🔥 Mostly medium questions
+    else:
+        difficulty = "hard" if answered_correctly else "medium"  # 🔥 Gradual increase to hard
 
-#         conn.close()
+    # ✅ Fetch two new questions dynamically
+    next_question = fetch_question_with_schema(difficulty)
+    backup_question = fetch_question_with_schema("medium" if difficulty == "hard" else "easy")
 
-#         return jsonify({
-#             "problem": {
-#                 "id": problem_id,
-#                 "question": question,
-#                 "type": type_,
-#                 "category": category
-#             },
-#             "tables": table_data
-#         })
+    return jsonify({
+        "test_id": test_id,  # 🔥 Return test_id for tracking
+        "questions": [next_question, backup_question],
+    }), 200
 
-#     except Exception as e:
-#         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
-    
+
+@app.route("/end-test", methods=["POST"])
+def end_test():
+    """
+    Ends the SQL Score test and saves results.
+    Extracts user_id from request body instead of JWT.
+    If `user_id` is valid, it means the user is logged in.
+    """
+    data = request.get_json()
+    user_id = data.get("user_id")  # Extract user_id from request
+    score = data.get("score")
+
+    if not score:
+        return jsonify({"error": "Score is required"}), 400
+
+    if not user_id:  # 🔥 No user_id in request → User is not logged in
+        return jsonify({"message": "Sign up to save your score!"}), 401
+
+    challenge_id = str(uuid.uuid4())  # Unique ID for test session
+    badge = (
+        "Beginner" if score < 20 else
+        "Intermediate" if score < 40 else
+        "SQL Pro"
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # 🔥 Validate user_id by checking if it exists in the database
+    cur.execute("SELECT id FROM users WHERE id = %s;", (user_id,))
+    valid_user = cur.fetchone()
+
+    if not valid_user:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Invalid user_id provided!"}), 400
+
+    # ✅ Insert test result since user_id is valid
+    cur.execute("""
+        INSERT INTO sql_test_results (user_id, challenge_id, score, badge, completed_at)
+        VALUES (%s, %s, %s, %s, NOW());
+    """, (user_id, challenge_id, score, badge))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"score": score, "badge": badge, "message": "Test completed!"}), 200
+
 def extract_table_names(sql_query):
     """
     Extracts table names from SQL queries safely using `sql_metadata`.
@@ -665,7 +756,6 @@ def submit_answer():
 
 
 @app.route("/run-answer", methods=["POST"])
-@jwt_required()
 def run_answer():
     user_id = ""
     
@@ -674,8 +764,6 @@ def run_answer():
     user_query = data.get("user_query")
     is_submit = data.get("is_submit", False)
 
-    if is_submit:
-        user_id = get_jwt_identity()
     
     if not question_id or not user_query:
         return jsonify({"error": "Question ID and SQL query are required"}), 400
