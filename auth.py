@@ -753,21 +753,26 @@ def submit_answer():
     finally:
         if conn:
             conn.close()  # ✅ Ensure DB connection is always closed
+def convert_time_values(rows):
+    """Convert TIME objects to string format (HH:MM:SS) in query results."""
+    return [
+        [value.strftime("%H:%M:%S") if isinstance(value, datetime.time) else value for value in row]
+        for row in rows
+    ]
 
 
 @app.route("/run-answer", methods=["POST"])
 def run_answer():
     user_id = ""
-    
+
     data = request.get_json()
     question_id = data.get("question_id")
     user_query = data.get("user_query")
     is_submit = data.get("is_submit", False)
 
-    
     if not question_id or not user_query:
         return jsonify({"error": "Question ID and SQL query are required"}), 400
-    
+
     if not is_safe_query(user_query):
         return jsonify({"error": "Unsafe SQL query detected!"}), 400
 
@@ -788,12 +793,19 @@ def run_answer():
         correct_result = cur.fetchall()
         correct_execution_time = round((timer.time() - start_time) * 1000, 2)  # ✅ Convert to ms
 
+        # ✅ Convert TIME objects to string format in correct result
+        correct_result = convert_time_values(correct_result)
+
         # ✅ Execute User Query & Measure Execution Time
         try:
             start_time = timer.time()
             cur.execute(user_query)
             user_result = cur.fetchall()
             user_execution_time = round((timer.time() - start_time) * 1000, 2)  # ✅ Convert to ms
+
+            # ✅ Convert TIME objects to string format in user result
+            user_result = convert_time_values(user_result)
+
         except Exception as e:
             return jsonify({
                 "error": "Invalid SQL query",
