@@ -11,7 +11,7 @@ import re
 from datetime import time
 import time as timer
 from sql_metadata import Parser
-
+import uuid
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app, supports_credentials=True,resources={r"/*": {"origins": ["https://sqlpremierleague.com", "http://localhost:3000"]}})
@@ -416,6 +416,151 @@ def logout():
         httponly=False, secure=True, samesite="None"
     )
     return response
+
+import uuid
+
+@app.route("/start-sql-test", methods=["POST"])
+def start_sql_test():
+    challenge_id = str(uuid.uuid4())  # 🔥 Generate a unique test session ID
+
+    test_session = {
+        "challenge_id": challenge_id,
+        "score": 0,  
+        "difficulty": "easy"
+    }
+
+    # ✅ Fetch 3 questions (1 active, 2 queued)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, question, type FROM questions WHERE type = 'easy' ORDER BY RANDOM() LIMIT 3;")
+    questions = cur.fetchall()
+    conn.close()
+
+    if not questions:
+        return jsonify({"error": "No questions available"}), 500
+
+    return jsonify({
+        "message": "Test started!",
+        "challenge_id": challenge_id,  # ✅ Now included in response
+        "questions": [{"id": q[0], "question": q[1], "difficulty": q[2]} for q in questions],
+        "score": test_session["score"],
+        "difficulty": test_session["difficulty"]
+    })
+@app.route("/next-sql-question", methods=["POST"])
+def next_sql_question():
+    data = request.get_json()
+    challenge_id = data.get("challenge_id")  # 🔥 Now required
+    question_id = data.get("question_id")
+    user_query = data.get("user_query")
+    current_score = data.get("score")
+
+    if not challenge_id or not question_id or not user_query:
+        return jsonify({"error": "Challenge ID, Question ID, and SQL query are required"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # ✅ Fetch correct answer
+    cur.execute("SELECT correct_query, type FROM questions WHERE id = %s;", (question_id,))
+    correct_query_row = cur.fetchone()
+    
+    if not correct_query_row:
+        return jsonify({"error": "Invalid question ID"}), 400
+
+    correct_query, current_difficulty = correct_query_row
+
+    # ✅ Execute both queries & compare results
+    try:
+        cur.execute(correct_query)
+        correct_result = cur.fetchall()
+
+        cur.execute(user_query)
+        user_result = cur.fetchall()
+
+        is_correct = user_result == correct_result
+
+        # ✅ Increase difficulty if correct
+        difficulty_levels = ["easy", "medium", "hard"]
+        next_difficulty = difficulty_levels[min(difficulty_levels.index(current_difficulty) + 1, 2)] if is_correct else current_difficulty
+
+        # ✅ Update score
+        new_score = current_score + 1 if is_correct else current_score
+
+        # ✅ Fetch next 2 questions
+        cur.execute("SELECT id, question, type FROM questions WHERE type = %s ORDER BY RANDOM() LIMIT 2;", (next_difficulty,))
+        next_questions = cur.fetchall()
+        conn.close()
+
+        return jsonify({
+            "challenge_id": challenge_id,  # ✅ Keep the same challenge ID
+            "is_correct": is_correct,
+            "score": new_score,
+            "next_questions": [{"id": q[0], "question": q[1], "difficulty": q[2]} for q in next_questions],
+            "next_difficulty": next_difficulty
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/end-sql-test", methods=["POST"])
+def end_sql_test():
+    data = request.get_json()
+    challenge_id = data.get("challenge_id")
+    final_score = data.get("score")
+    user_id = data.get("user_id")  # 🔥 Getting `user_id` from frontend
+
+    if not challenge_id:
+        return jsonify({"error": "Challenge ID is required"}), 400
+
+    # ✅ Assign badge based on score
+    if final_score >= 10:
+        badge = "SQL Master 🏆"
+    elif final_score >= 5:
+        badge = "SQL Pro 🔥"
+    elif final_score >= 3:
+        badge = "SQL Learner 📚"
+    else:
+        badge = "Keep Practicing! 💪"
+
+    # ✅ Validate user_id before saving
+    if user_id:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # ✅ Check if user exists
+        cur.execute("SELECT COUNT(*) FROM users WHERE id = %s;", (user_id,))
+        user_exists = cur.fetchone()[0]
+
+        if user_exists == 0:
+            conn.close()
+            return jsonify({"error": "Invalid user ID"}), 400  # ❌ Reject invalid user_id
+
+        # ✅ Save valid user’s score
+        cur.execute("""
+            INSERT INTO sql_test_results (user_id, challenge_id, score, badge)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id, challenge_id) DO UPDATE 
+            SET score = EXCLUDED.score, badge = EXCLUDED.badge;
+        """, (user_id, challenge_id, final_score, badge))
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "message": "Score saved!",
+            "final_score": final_score,
+            "badge": badge,
+            "user_logged_in": True
+        })
+
+    # ✅ If user_id is NOT provided, just show the score (but don’t save it)
+    return jsonify({
+        "message": "Login to save your score!",
+        "final_score": final_score,
+        "badge": badge,
+        "user_logged_in": False
+    })
 
 
 def generate_csrf_token():
