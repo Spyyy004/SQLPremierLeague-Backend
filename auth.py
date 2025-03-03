@@ -334,7 +334,7 @@ def assign_badge(correct_answers, total_questions):
     accuracy = correct_answers / total_questions if total_questions > 0 else 0
 
     if accuracy >= 0.8:
-        return "Pro"
+        return "Wizard"
     elif accuracy >= 0.5:
         return "Intermediate"
     else:
