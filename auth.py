@@ -1420,7 +1420,8 @@ def claim_test(test_session_id):
                 return jsonify({
                     "message": "Test session has already been completed.",
                     "test_session_id": test_session_id,
-                    "user_id": existing_user_id
+                    "user_id": user_id,
+                    "existing_user_id":existing_user_id
                 }), 200
             else:
                 return jsonify({"error": "This test session was completed by another user."}), 403
