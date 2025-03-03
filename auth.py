@@ -1378,49 +1378,63 @@ if __name__ == "__main__":
     app.run(debug=True)
 
 @app.route("/claim-test/<test_session_id>", methods=["POST"])
-@jwt_required()
+@jwt_required()  # Requires authentication
 def claim_test(test_session_id):
     """
-    Allows a logged-in user to claim a test session that was started anonymously
+    Allows a logged-in user to claim a test session that was started anonymously.
+    If the test session is already completed, return the session details.
     """
-    user_id = get_jwt_identity()
+    user_id = get_jwt_identity()  # Get the logged-in user's ID from the JWT
 
     try:
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Check if test session exists and is unclaimed
+        # Check if test session exists
         cur.execute("""
-            SELECT status 
+            SELECT status, user_id 
             FROM test_sessions 
-            WHERE id = %s AND user_id IS NULL;
+            WHERE id = %s;
         """, (test_session_id,))
         
         test_session = cur.fetchone()
         
         if not test_session:
-            return jsonify({
-                "error": "Test session not found or already claimed"
-            }), 404
+            return jsonify({"error": "Test session not found"}), 404
 
-        # Claim the test session
-        cur.execute("""
-            UPDATE test_sessions 
-            SET user_id = %s 
-            WHERE id = %s AND user_id IS NULL
-            RETURNING id;
-        """, (user_id, test_session_id))
+        session_status, existing_user_id = test_session
         
-        if cur.fetchone():
-            conn.commit()
-            return jsonify({
-                "message": "Test session claimed successfully",
-                "test_session_id": test_session_id
-            }), 200
+        # If the session is already completed
+        if session_status == 'completed':
+            # Check if the existing user ID matches the logged-in user ID
+            if existing_user_id == user_id:
+                return jsonify({
+                    "message": "Test session has already been completed.",
+                    "test_session_id": test_session_id,
+                    "user_id": existing_user_id
+                }), 200
+            else:
+                return jsonify({"error": "This test session was completed by another user."}), 403
+
+        # If the session is unclaimed, claim it
+        if existing_user_id is None:
+            cur.execute("""
+                UPDATE test_sessions 
+                SET user_id = %s 
+                WHERE id = %s
+                RETURNING id;
+            """, (user_id, test_session_id))
+            
+            if cur.fetchone():
+                conn.commit()
+                return jsonify({
+                    "message": "Test session claimed successfully",
+                    "test_session_id": test_session_id
+                }), 200
+            else:
+                return jsonify({"error": "Failed to claim test session"}), 400
         else:
-            return jsonify({
-                "error": "Failed to claim test session"
-            }), 400
+            return jsonify({"error": "Test session has already been claimed."}), 400
 
     except Exception as e:
         print("Error in claim_test:", str(e))
