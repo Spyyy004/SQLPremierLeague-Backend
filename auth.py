@@ -325,7 +325,7 @@ def next_question():
 
 
 @app.route("/end-test", methods=["POST"])
-@jwt_required(optional=True)  # Make authentication optional
+@jwt_required(optional=True)
 def end_test():
     """
     Ends the test and provides comprehensive results.
@@ -339,8 +339,22 @@ def end_test():
         return jsonify({"error": "Test session ID is required"}), 400
 
     try:
+        print(f"Received request to end test for session ID: {test_session_id} by user: {user_id}")
+
         conn = get_db_connection()
         cur = conn.cursor()
+
+        # Check if the test session exists
+        cur.execute("""
+            SELECT status 
+            FROM test_sessions 
+            WHERE id = %s;
+        """, (test_session_id,))
+        
+        test_session = cur.fetchone()
+        
+        if not test_session:
+            return jsonify({"error": "Test session not found"}), 404
 
         # Get all attempts for this test session
         cur.execute("""
@@ -429,8 +443,8 @@ def end_test():
         return jsonify(response_data), 200
 
     except Exception as e:
-        print("Error in end_test:", str(e))
-        return jsonify({"error": "Internal server error"}), 500
+        print("Error in end_test:", str(e))  # Log the error
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
     finally:
         if conn:
             conn.close()
