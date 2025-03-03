@@ -9,7 +9,6 @@ from datetime import time
 import datetime
 import re
 from datetime import time
-from flask_jwt_extended import jwt_optional, jwt_required, get_jwt_identity
 import time as timer
 from sql_metadata import Parser
 import uuid
@@ -326,7 +325,7 @@ def next_question():
 
 
 @app.route("/end-test", methods=["POST"])
-@jwt_optional
+@jwt_required(optional=True)
 def end_test():
     """
     Ends the test and provides comprehensive results.
