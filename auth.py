@@ -62,7 +62,7 @@ def challenge_of_the_day():
         if challenge:
             challenge_id = challenge[0]
         else:
-            # ✅ Get yesterday’s challenge to ensure a new one is selected
+            # ✅ Get yesterday's challenge to ensure a new one is selected
             cur.execute("SELECT challenge_id FROM daily_challenge WHERE challenge_date = %s;", (today - datetime.timedelta(days=1),))
             yesterday_challenge = cur.fetchone()
             yesterday_id = yesterday_challenge[0] if yesterday_challenge else None
@@ -76,7 +76,7 @@ def challenge_of_the_day():
 
             challenge_id = challenge_data[0]
 
-            # ✅ Insert today’s challenge
+            # ✅ Insert today's challenge
             cur.execute("INSERT INTO daily_challenge (challenge_date, challenge_id) VALUES (%s, %s);", (today, challenge_id))
             conn.commit()
 
@@ -244,20 +244,45 @@ def fetch_question_with_schema(difficulty):
 @app.route("/start-test", methods=["POST"])
 def start_test():
     """
-    Start a new SQL Score Test.
-    Returns 3 questions (1 to render, 2 in queue) along with table schemas.
-    No session is stored, as test tracking happens on the frontend.
+    Starts a new SQL test and creates a test session.
     """
-    first_question = fetch_question_with_schema("easy")
-    if not first_question:
-        return jsonify({"error": "No questions available"}), 404
+    try:
+        # Get user_id if logged in
+        user_id = None
+        try:
+            verify_jwt_in_request(optional=True)
+            user_id = get_jwt_identity()
+        except:
+            pass
 
-    second_question = fetch_question_with_schema("easy")
-    third_question = fetch_question_with_schema("medium")
+        conn = get_db_connection()
+        cur = conn.cursor()
 
-    return jsonify({
-        "questions": [first_question, second_question, third_question],
-    }), 200
+        # Create new test session
+        test_session_id = str(uuid.uuid4())
+        cur.execute("""
+            INSERT INTO test_sessions (id, user_id, status)
+            VALUES (%s, %s, 'in_progress')
+            RETURNING id;
+        """, (test_session_id, user_id))
+        conn.commit()
+
+        # Fetch initial questions
+        first_question = fetch_question_with_schema("easy")
+        second_question = fetch_question_with_schema("easy")
+        third_question = fetch_question_with_schema("medium")
+
+        return jsonify({
+            "test_session_id": test_session_id,
+            "questions": [first_question, second_question, third_question],
+        }), 200
+
+    except Exception as e:
+        print("Error in start_test:", str(e))
+        return jsonify({"error": "Internal server error"}), 500
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.route("/next-question", methods=["POST"])
@@ -300,52 +325,134 @@ def next_question():
 
 
 @app.route("/end-test", methods=["POST"])
+@jwt_required(optional=True)  # Make authentication optional
 def end_test():
     """
-    Ends the SQL Score test and saves results.
-    Extracts user_id from request body instead of JWT.
-    If `user_id` is valid, it means the user is logged in.
+    Ends the test and provides comprehensive results.
+    Full results are only shown to logged-in users.
     """
+    user_id = get_jwt_identity()
     data = request.get_json()
-    user_id = data.get("user_id")  # Extract user_id from request
-    score = data.get("score")
+    test_session_id = data.get("test_session_id")
 
-    if not score:
-        return jsonify({"error": "Score is required"}), 400
+    if not test_session_id:
+        return jsonify({"error": "Test session ID is required"}), 400
 
-    if not user_id:  # 🔥 No user_id in request → User is not logged in
-        return jsonify({"message": "Sign up to save your score!"}), 401
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
 
-    challenge_id = str(uuid.uuid4())  # Unique ID for test session
-    badge = (
-        "Beginner" if score < 20 else
-        "Intermediate" if score < 40 else
-        "SQL Pro"
-    )
+        # Get all attempts for this test session
+        cur.execute("""
+            SELECT 
+                q.id,
+                q.question,
+                q.type,
+                q.category,
+                q.correct_query,
+                ta.user_query,
+                ta.is_correct,
+                ta.execution_time
+            FROM test_attempts ta
+            JOIN questions q ON ta.question_id = q.id
+            WHERE ta.test_session_id = %s
+            ORDER BY ta.attempted_at;
+        """, (test_session_id,))
+        
+        attempts = cur.fetchall()
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+        if not attempts:
+            return jsonify({"error": "No attempts found for this test session"}), 404
 
-    # 🔥 Validate user_id by checking if it exists in the database
-    cur.execute("SELECT id FROM users WHERE id = %s;", (user_id,))
-    valid_user = cur.fetchone()
+        # Calculate score and statistics
+        total_questions = len(attempts)
+        correct_answers = sum(1 for attempt in attempts if attempt[6])  # is_correct
+        score = round((correct_answers / total_questions) * 100)
+        
+        badge = (
+            "Beginner" if score < 20 else
+            "Intermediate" if score < 40 else
+            "SQL Pro"
+        )
 
-    if not valid_user:
-        cur.close()
-        conn.close()
-        return jsonify({"error": "Invalid user_id provided!"}), 400
+        # Update test session with final results
+        cur.execute("""
+            UPDATE test_sessions 
+            SET status = 'completed', 
+                end_time = NOW(),
+                score = %s,
+                badge = %s,
+                user_id = %s
+            WHERE id = %s;
+        """, (score, badge, user_id, test_session_id))
 
-    # ✅ Insert test result since user_id is valid
-    cur.execute("""
-        INSERT INTO sql_test_results (user_id, challenge_id, score, badge, completed_at)
-        VALUES (%s, %s, %s, %s, NOW());
-    """, (user_id, challenge_id, score, badge))
-    conn.commit()
-    cur.close()
-    conn.close()
+        if user_id:
+            # For logged-in users: provide full details
+            question_details = [{
+                "question_id": attempt[0],
+                "question_text": attempt[1],
+                "type": attempt[2],
+                "category": attempt[3],
+                "correct_query": attempt[4],
+                "user_query": attempt[5],
+                "is_correct": attempt[6],
+                "execution_time": attempt[7]
+            } for attempt in attempts]
 
-    return jsonify({"score": score, "badge": badge, "message": "Test completed!"}), 200
+            response_data = {
+                "test_summary": {
+                    "test_session_id": test_session_id,
+                    "score": score,
+                    "badge": badge,
+                    "total_questions": total_questions,
+                    "correct_answers": correct_answers,
+                    "accuracy": round((correct_answers / total_questions * 100), 2)
+                },
+                "question_details": question_details,
+                "message": "Test completed successfully!",
+                "user_id": user_id
+            }
+        else:
+            # For non-logged-in users: show limited results and prompt to login
+            response_data = {
+                "message": "Please log in to view full results",
+                "preview": {
+                    "test_session_id": test_session_id,
+                    "score": score,
+                    "total_questions": total_questions,
+                    "correct_answers": correct_answers,
+                     "user_id": user_id
+                }
+            }
 
+        conn.commit()
+        return jsonify(response_data), 200
+
+    except Exception as e:
+        print("Error in end_test:", str(e))
+        return jsonify({"error": "Internal server error"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+def compare_query_results(cur, user_query, question_id):
+    """Helper function to compare query results"""
+    # Get correct query
+    cur.execute("SELECT correct_query FROM questions WHERE id = %s;", (question_id,))
+    correct_query = cur.fetchone()[0]
+
+    # Execute correct query
+    cur.execute(correct_query)
+    correct_result = cur.fetchall()
+
+    # Execute user query
+    cur.execute(user_query)
+    user_result = cur.fetchall()
+
+    # Compare results
+    is_correct = user_result == correct_result
+
+    return is_correct, user_result, correct_result
 def extract_table_names(sql_query):
     """
     Extracts table names from SQL queries safely using `sql_metadata`.
@@ -753,6 +860,8 @@ def submit_answer():
     finally:
         if conn:
             conn.close()  # ✅ Ensure DB connection is always closed
+
+
 def convert_time_values(rows):
     """Convert TIME objects to string format (HH:MM:SS) in query results."""
     return [
@@ -841,6 +950,9 @@ def run_answer():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+
 
 @app.route("/submissions", methods=["GET"])
 @jwt_required()
@@ -1138,6 +1250,273 @@ def delete_comment(discussion_id):
     return jsonify({"message": "Comment deleted successfully"})
 
 
+@app.route("/submit-test-answer", methods=["POST"])
+def submit_test_answer():
+    """
+    Handles individual question submissions during the test.
+    Stores each attempt in the database.
+    """
+    data = request.get_json()
+    test_session_id = data.get("test_session_id")
+    question_id = data.get("question_id")
+    user_query = data.get("user_query")
+
+    if not all([test_session_id, question_id, user_query]):
+        return jsonify({"error": "Missing required fields"}), 400
+
+    if not is_safe_query(user_query):
+        return jsonify({"error": "Unsafe SQL query detected!"}), 400
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Verify test session is active
+        cur.execute("""
+            SELECT status FROM test_sessions 
+            WHERE id = %s AND status = 'in_progress';
+        """, (test_session_id,))
+        
+        if not cur.fetchone():
+            return jsonify({"error": "Invalid or completed test session"}), 400
+
+        # Execute queries and compare results
+        start_time = timer.time()
+        
+        # Get correct query
+        cur.execute("SELECT correct_query FROM questions WHERE id = %s;", (question_id,))
+        correct_query = cur.fetchone()[0]
+
+        # Execute correct query & measure time
+        cur.execute(correct_query)
+        correct_result = cur.fetchall()
+        correct_execution_time = round((timer.time() - start_time) * 1000, 2)
+
+        # Execute user query & measure time
+        try:
+            start_time = timer.time()
+            cur.execute(user_query)
+            user_result = cur.fetchall()
+            user_execution_time = round((timer.time() - start_time) * 1000, 2)
+        except Exception as e:
+            return jsonify({
+                "error": "Invalid SQL query",
+                "details": str(e),
+                "user_result": None,
+                "correct_result": correct_result,
+                "user_execution_time": None,
+                "correct_execution_time": correct_execution_time
+            }), 400
+
+        # Compare results
+        is_correct = user_result == correct_result
+
+        # Store the attempt
+        cur.execute("""
+            INSERT INTO test_attempts 
+            (test_session_id, question_id, user_query, is_correct, execution_time)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id;
+        """, (test_session_id, question_id, user_query, is_correct, user_execution_time))
+        conn.commit()
+
+        return jsonify({
+            "is_correct": is_correct,
+            "user_result": user_result,
+            "correct_result": correct_result,
+            "user_execution_time": user_execution_time,
+            "correct_execution_time": correct_execution_time
+        }), 200
+
+    except Exception as e:
+        print("Error in submit_test_answer:", str(e))
+        return jsonify({"error": "Internal server error"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+# Required SQL tables (if not already created):
+"""
+CREATE TABLE test_sessions (
+    id UUID PRIMARY KEY,
+    user_id UUID,  -- nullable for anonymous users
+    start_time TIMESTAMP DEFAULT NOW(),
+    end_time TIMESTAMP,
+    score INTEGER,
+    badge VARCHAR(50),
+    status VARCHAR(20) DEFAULT 'in_progress'  -- 'in_progress' or 'completed'
+);
+
+CREATE TABLE test_attempts (
+    id SERIAL PRIMARY KEY,
+    test_session_id UUID REFERENCES test_sessions(id),
+    question_id INTEGER REFERENCES questions(id),
+    user_query TEXT,
+    is_correct BOOLEAN,
+    execution_time FLOAT,
+    attempted_at TIMESTAMP DEFAULT NOW()
+);
+"""
+
 # Run Flask Server
 if __name__ == "__main__":
     app.run(debug=True)
+
+@app.route("/claim-test/<test_session_id>", methods=["POST"])
+@jwt_required()
+def claim_test(test_session_id):
+    """
+    Allows a logged-in user to claim a test session that was started anonymously
+    """
+    user_id = get_jwt_identity()
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Check if test session exists and is unclaimed
+        cur.execute("""
+            SELECT status 
+            FROM test_sessions 
+            WHERE id = %s AND user_id IS NULL;
+        """, (test_session_id,))
+        
+        test_session = cur.fetchone()
+        
+        if not test_session:
+            return jsonify({
+                "error": "Test session not found or already claimed"
+            }), 404
+
+        # Claim the test session
+        cur.execute("""
+            UPDATE test_sessions 
+            SET user_id = %s 
+            WHERE id = %s AND user_id IS NULL
+            RETURNING id;
+        """, (user_id, test_session_id))
+        
+        if cur.fetchone():
+            conn.commit()
+            return jsonify({
+                "message": "Test session claimed successfully",
+                "test_session_id": test_session_id
+            }), 200
+        else:
+            return jsonify({
+                "error": "Failed to claim test session"
+            }), 400
+
+    except Exception as e:
+        print("Error in claim_test:", str(e))
+        return jsonify({"error": "Internal server error"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+@app.route("/test-report/<test_session_id>", methods=["GET"])
+@jwt_required()  # Requires authentication
+def get_test_report(test_session_id):
+    """
+    Fetches complete test report for a logged-in user.
+    Only shows reports for tests associated with the requesting user.
+    """
+    user_id = get_jwt_identity()
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # First verify this test belongs to the requesting user
+        cur.execute("""
+            SELECT user_id, score, badge, start_time, end_time 
+            FROM test_sessions 
+            WHERE id = %s AND status = 'completed';
+        """, (test_session_id,))
+        
+        test_session = cur.fetchone()
+        
+        if not test_session:
+            return jsonify({"error": "Test session not found"}), 404
+            
+        session_user_id = test_session[0]
+        if str(session_user_id) != str(user_id):
+            return jsonify({"error": "Unauthorized access to test report"}), 403
+
+        # Get all attempts with question details
+        cur.execute("""
+            SELECT 
+                q.id,
+                q.question,
+                q.type,
+                q.category,
+                q.correct_query,
+                ta.user_query,
+                ta.is_correct,
+                ta.execution_time,
+                ta.attempted_at
+            FROM test_attempts ta
+            JOIN questions q ON ta.question_id = q.id
+            WHERE ta.test_session_id = %s
+            ORDER BY ta.attempted_at;
+        """, (test_session_id,))
+        
+        attempts = cur.fetchall()
+
+        # Calculate statistics
+        total_questions = len(attempts)
+        correct_answers = sum(1 for attempt in attempts if attempt[6])  # is_correct
+        accuracy = round((correct_answers / total_questions * 100), 2) if total_questions > 0 else 0
+        
+        # Get table schemas for each question
+        question_details = []
+        for attempt in attempts:
+            question_id = attempt[0]
+            
+            # Extract tables from correct query
+            required_tables = extract_table_names(attempt[4])  # correct_query
+            table_data = extract_table_data(required_tables)
+            
+            question_details.append({
+                "question_id": question_id,
+                "question_text": attempt[1],
+                "type": attempt[2],
+                "category": attempt[3],
+                "correct_query": attempt[4],
+                "user_query": attempt[5],
+                "is_correct": attempt[6],
+                "execution_time": attempt[7],
+                "attempted_at": attempt[8],
+                "table_schemas": table_data
+            })
+
+        return jsonify({
+            "test_summary": {
+                "test_session_id": test_session_id,
+                "score": test_session[1],  # score
+                "badge": test_session[2],  # badge
+                "start_time": test_session[3],
+                "end_time": test_session[4],
+                "total_questions": total_questions,
+                "correct_answers": correct_answers,
+                "accuracy": accuracy,
+                "completion_time": str(test_session[4] - test_session[3]) if test_session[4] else None
+            },
+            "question_details": question_details,
+            "performance_summary": {
+                "easy_questions": sum(1 for q in question_details if q["type"] == "easy"),
+                "medium_questions": sum(1 for q in question_details if q["type"] == "medium"),
+                "hard_questions": sum(1 for q in question_details if q["type"] == "hard"),
+                "easy_correct": sum(1 for q in question_details if q["type"] == "easy" and q["is_correct"]),
+                "medium_correct": sum(1 for q in question_details if q["type"] == "medium" and q["is_correct"]),
+                "hard_correct": sum(1 for q in question_details if q["type"] == "hard" and q["is_correct"]),
+                "avg_execution_time": round(sum(q["execution_time"] for q in question_details) / len(question_details), 2)
+            }
+        }), 200
+
+    except Exception as e:
+        print("Error in get_test_report:", str(e))
+        return jsonify({"error": "Internal server error"}), 500
+    finally:
+        if conn:
+            conn.close()
