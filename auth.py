@@ -1424,7 +1424,7 @@ def claim_test(test_session_id):
                     "existing_user_id":existing_user_id
                 }), 200
             else:
-                return jsonify({"error": "This test session was completed by another user."}), 403
+                return jsonify({"error": "This test session was completed by another user.","user_id": user_id, "existing_user_id": existing_user_id}), 403
 
         # If the session is pending-claim, allow the user to claim it
         if session_status == 'pending_claim':
