@@ -1426,7 +1426,7 @@ def claim_test(test_session_id):
                 return jsonify({"error": "This test session was completed by another user."}), 403
 
         # If the session is pending-claim, allow the user to claim it
-        if session_status == 'pending-claim':
+        if session_status == 'pending_claim':
             cur.execute("""
                 UPDATE test_sessions 
                 SET user_id = %s, status = 'completed'  -- Optionally mark as completed
