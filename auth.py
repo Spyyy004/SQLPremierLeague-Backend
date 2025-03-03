@@ -305,11 +305,11 @@ def next_question():
         return jsonify({"error": "Score and correct answers count are required"}), 400
 
     # 🔥 Adjust difficulty based on overall progress
-    if score < 10:
+    if score < 20:
         difficulty = "easy"  # 🔥 Keep showing easy questions initially
-    elif 10 <= score < 30:
+    elif 20 <= score < 40:
         difficulty = "medium" if answered_correctly else "easy"  # 🔥 Introduce medium questions
-    elif 30 <= score < 50:
+    elif 50 <= score < 70:
         difficulty = "medium" if answered_correctly else "medium"  # 🔥 Mostly medium questions
     else:
         difficulty = "hard" if answered_correctly else "medium"  # 🔥 Gradual increase to hard
@@ -323,6 +323,23 @@ def next_question():
         "questions": [next_question, backup_question],
     }), 200
 
+def assign_badge(correct_answers, total_questions):
+    """
+    Assign a badge based on the user's performance.
+    Requires a minimum number of questions answered to qualify for higher badges.
+    """
+    if total_questions < 5:
+        return "Participation"  # Not enough questions answered for higher badges
+
+    accuracy = correct_answers / total_questions if total_questions > 0 else 0
+
+    if accuracy >= 0.8:
+        return "Pro"
+    elif accuracy >= 0.5:
+        return "Intermediate"
+    else:
+        return "Beginner"
+    
 
 @app.route("/end-test", methods=["POST"])
 @jwt_required(optional=True)
@@ -383,11 +400,7 @@ def end_test():
         correct_answers = sum(1 for attempt in attempts if attempt[6])  # is_correct
         score = round((correct_answers / total_questions) * 100)
         
-        badge = (
-            "Beginner" if score < 20 else
-            "Intermediate" if score < 40 else
-            "SQL Pro"
-        )
+        badge = assign_badge(correct_answers=correct_answers, total_questions=total_questions)
 
         # Update test session with final results
         
@@ -1414,20 +1427,27 @@ def claim_test(test_session_id):
 
         session_status, existing_user_id = test_session
         
+        # Ensure user_id is an integer for comparison
+        if isinstance(user_id, str):
+            user_id = int(user_id)  # Convert to integer if it's a string
+
         # If the session is already completed
         if session_status == 'completed':
             if existing_user_id == user_id:
                 return jsonify({
                     "message": "Test session has already been completed.",
                     "test_session_id": test_session_id,
-                    "user_id": user_id,
-                    "existing_user_id":existing_user_id
+                    "user_id": existing_user_id
                 }), 200
             else:
-                return jsonify({"error": "This test session was completed by another user.","user_id": user_id, "existing_user_id": existing_user_id}), 403
+                return jsonify({
+                    "error": "This test session was completed by another user.",
+                    "existing_user_id": existing_user_id,
+                    "user_id": user_id
+                }), 403
 
         # If the session is pending-claim, allow the user to claim it
-        if session_status == 'pending_claim':
+        if session_status == 'pending-claim':
             cur.execute("""
                 UPDATE test_sessions 
                 SET user_id = %s, status = 'completed'  -- Optionally mark as completed
