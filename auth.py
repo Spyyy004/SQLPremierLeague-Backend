@@ -331,7 +331,7 @@ def end_test():
     Ends the test and provides comprehensive results.
     Full results are only shown to logged-in users.
     """
-    
+    user_id = get_jwt_identity()
     data = request.get_json()
     test_session_id = data.get("test_session_id")
 
@@ -390,7 +390,7 @@ def end_test():
         )
 
         # Update test session with final results
-        user_id = get_jwt_identity()
+        
         cur.execute("""
             UPDATE test_sessions 
             SET status = 'completed', 
