@@ -391,7 +391,10 @@ def end_test():
 
         # Update test session with final results
         
-        cur.execute("""
+       
+
+        if user_id:
+            cur.execute("""
             UPDATE test_sessions 
             SET status = 'completed', 
                 end_time = NOW(),
@@ -400,8 +403,6 @@ def end_test():
                 user_id = %s
             WHERE id = %s;
         """, (score, badge, user_id, test_session_id))
-
-        if user_id:
             # For logged-in users: provide full details
             question_details = [{
                 "question_id": attempt[0],
@@ -428,7 +429,15 @@ def end_test():
                 "user_id": user_id
             }
         else:
-            # For non-logged-in users: show limited results and prompt to login
+            cur.execute("""
+            UPDATE test_sessions 
+            SET status = 'pending_claim', 
+                end_time = NOW(),
+                score = %s,
+                badge = %s,
+                user_id = %s
+            WHERE id = %s;
+        """, (score, badge, user_id, test_session_id))
             response_data = {
                 "message": "Please log in to view full results",
                 "preview": {
@@ -1383,6 +1392,7 @@ def claim_test(test_session_id):
     """
     Allows a logged-in user to claim a test session that was started anonymously.
     If the test session is already completed, return the session details.
+    If the status is 'pending-claim', allow the user to claim it.
     """
     user_id = get_jwt_identity()  # Get the logged-in user's ID from the JWT
 
@@ -1406,7 +1416,6 @@ def claim_test(test_session_id):
         
         # If the session is already completed
         if session_status == 'completed':
-            # Check if the existing user ID matches the logged-in user ID
             if existing_user_id == user_id:
                 return jsonify({
                     "message": "Test session has already been completed.",
@@ -1415,6 +1424,24 @@ def claim_test(test_session_id):
                 }), 200
             else:
                 return jsonify({"error": "This test session was completed by another user."}), 403
+
+        # If the session is pending-claim, allow the user to claim it
+        if session_status == 'pending-claim':
+            cur.execute("""
+                UPDATE test_sessions 
+                SET user_id = %s, status = 'completed'  -- Optionally mark as completed
+                WHERE id = %s
+                RETURNING id;
+            """, (user_id, test_session_id))
+            
+            if cur.fetchone():
+                conn.commit()
+                return jsonify({
+                    "message": "Test session claimed successfully",
+                    "test_session_id": test_session_id
+                }), 200
+            else:
+                return jsonify({"error": "Failed to claim test session"}), 400
 
         # If the session is unclaimed, claim it
         if existing_user_id is None:
