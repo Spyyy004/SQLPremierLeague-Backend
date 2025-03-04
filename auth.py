@@ -1597,3 +1597,44 @@ def get_test_report(test_session_id):
     finally:
         if conn:
             conn.close()
+
+@app.route("/report-issue", methods=["POST"])
+def report_issue():
+    """
+    Endpoint to report an issue.
+    Expects JSON payload with 'issue_reported' and 'comments'.
+    """
+    data = request.get_json()
+
+    # Validate input
+    issue_reported = data.get("issue_reported")
+    comments = data.get("comments")
+
+    if not issue_reported:
+        return jsonify({"error": "Issue reported is required."}), 400
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Insert the reported issue into the database
+        cur.execute("""
+            INSERT INTO user_issues (issue_reported, comments) 
+            VALUES (%s, %s) 
+            RETURNING id;
+        """, (issue_reported, comments))
+
+        issue_id = cur.fetchone()[0]
+        conn.commit()
+
+        return jsonify({
+            "message": "Issue reported successfully.",
+            "issue_id": issue_id
+        }), 201
+
+    except Exception as e:
+        print("Error in report_issue:", str(e))
+        return jsonify({"error": "Internal server error."}), 500
+    finally:
+        if conn:
+            conn.close()
