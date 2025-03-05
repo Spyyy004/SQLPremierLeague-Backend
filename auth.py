@@ -883,7 +883,7 @@ def submit_answer():
     question_id = data.get("question_id")
     user_query = data.get("user_query")
     is_submit = data.get("is_submit", False)
-
+    xp_spent = data.get("xp_spent",0)
     if not is_safe_query(user_query):
         return jsonify({"error": "Unsafe SQL query detected!"}), 400
 
@@ -964,7 +964,7 @@ def submit_answer():
 
             # ✅ Update user XP if earned
             if is_correct and xp_award > 0:
-                cur.execute("UPDATE users SET xp = xp + %s WHERE id = %s;", (xp_award, user_id))
+                cur.execute("UPDATE users SET xp = xp + %s WHERE id = %s;", (xp_award-xp_spent, user_id))
 
             conn.commit()
 
@@ -975,7 +975,7 @@ def submit_answer():
             "correct_query_result": correct_result,
             "user_execution_time": user_execution_time,
             "correct_execution_time": correct_execution_time,
-            "xp_award": xp_award,
+            "xp_award": xp_award-xp_spent,
             "is_repeat": is_repeat
         }), 201
 
