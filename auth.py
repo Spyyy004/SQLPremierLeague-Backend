@@ -140,16 +140,19 @@ def extract_table_data(tables):
     conn.close()
     return table_data
 
-
 @app.route("/problem/<int:problem_id>", methods=["GET"])
 def get_problem(problem_id):
-    """Fetch problem details and return only the necessary tables used in the correct_query."""
+    """Fetch problem details along with hints and necessary table data."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
 
         # ✅ Fetch problem details along with the correct query
-        cur.execute("SELECT id, question, type, category, correct_query FROM questions WHERE id = %s;", (problem_id,))
+        cur.execute("""
+            SELECT id, question, type, category, correct_query 
+            FROM questions 
+            WHERE id = %s;
+        """, (problem_id,))
         problem = cur.fetchone()
 
         if not problem:
@@ -200,15 +203,100 @@ def get_problem(problem_id):
             except Exception as table_error:
                 return jsonify({"error": f"Failed fetching data for table {table}: {str(table_error)}"}), 500
 
+        # ✅ Fetch Hints for the Question
+        cur.execute("""
+            SELECT hint_text 
+            FROM question_hints 
+            WHERE question_id = %s 
+            ORDER BY hint_order;
+        """, (problem_id,))
+        hints = [row[0] for row in cur.fetchall()]
+
         conn.close()
 
         return jsonify({
-            "problem": {"id": problem_id, "question": question, "type": type_, "category": category},
+            "problem": {
+                "id": problem_id,
+                "question": question,
+                "type": type_,
+                "category": category,
+                "hints": hints
+            },
             "tables": table_data
         })
 
     except Exception as e:
         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
+
+
+# @app.route("/problem/<int:problem_id>", methods=["GET"])
+# def get_problem(problem_id):
+#     """Fetch problem details and return only the necessary tables used in the correct_query."""
+#     try:
+#         conn = get_db_connection()
+#         cur = conn.cursor()
+
+#         # ✅ Fetch problem details along with the correct query
+#         cur.execute("SELECT id, question, type, category, correct_query FROM questions WHERE id = %s;", (problem_id,))
+#         problem = cur.fetchone()
+
+#         if not problem:
+#             conn.close()
+#             return jsonify({"error": "Problem not found"}), 404
+
+#         problem_id, question, type_, category, correct_query = problem
+
+#         if not correct_query:
+#             return jsonify({"error": "No correct query found for this problem"}), 400
+
+#         # ✅ Extract table names dynamically from the correct SQL query
+#         required_tables = extract_table_names(correct_query)
+
+#         if not required_tables:
+#             return jsonify({"error": "No tables detected in correct query"}), 400
+
+#         table_data = {}
+
+#         for table in required_tables:
+#             try:
+#                 # ✅ Fetch column names & data types
+#                 cur.execute("""
+#                     SELECT column_name, data_type 
+#                     FROM information_schema.columns 
+#                     WHERE table_name = %s 
+#                     ORDER BY ordinal_position;
+#                 """, (table,))
+                
+#                 columns_info = cur.fetchall()
+#                 columns = [col[0] for col in columns_info]
+
+#                 if not columns:
+#                     raise Exception(f"Table '{table}' has no columns or does not exist.")
+
+#                 # ✅ Fetch sample data (limit 3 rows)
+#                 cur.execute(f"SELECT {', '.join(columns)} FROM {table} LIMIT 3;")
+#                 rows = cur.fetchall()
+
+#                 # ✅ Convert TIME columns to string format
+#                 formatted_rows = [
+#                     [value.strftime("%H:%M:%S") if isinstance(value, time) else value for value in row]
+#                     for row in rows
+#                 ]
+
+#                 table_data[table] = {"columns": columns, "sample_data": formatted_rows}
+
+#             except Exception as table_error:
+#                 return jsonify({"error": f"Failed fetching data for table {table}: {str(table_error)}"}), 500
+
+#         conn.close()
+
+#         return jsonify({
+#             "problem": {"id": problem_id, "question": question, "type": type_, "category": category},
+#             "tables": table_data
+#         })
+
+#     except Exception as e:
+#         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
 def fetch_question_with_schema(difficulty):
     """
