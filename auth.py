@@ -329,7 +329,7 @@ def assign_badge(correct_answers, total_questions):
     Requires a minimum number of questions answered to qualify for higher badges.
     """
     if total_questions < 5:
-        return "Participation"  # Not enough questions answered for higher badges
+        return "Try"  # Not enough questions answered for higher badges
 
     accuracy = correct_answers / total_questions if total_questions > 0 else 0
 
@@ -1609,7 +1609,8 @@ def report_issue():
     # Validate input
     issue_reported = data.get("issue_reported")
     comments = data.get("comments")
-
+    user_id = data.get("user_id")
+    question_id = data.get("question_id")
     if not issue_reported:
         return jsonify({"error": "Issue reported is required."}), 400
 
@@ -1619,10 +1620,10 @@ def report_issue():
 
         # Insert the reported issue into the database
         cur.execute("""
-            INSERT INTO user_issues (issue_reported, comments) 
-            VALUES (%s, %s) 
+            INSERT INTO user_issues (issue_reported, comments,user_id,question_id) 
+            VALUES (%s, %s,%s,%s) 
             RETURNING id;
-        """, (issue_reported, comments))
+        """, (issue_reported, comments,user_id,question_id))
 
         issue_id = cur.fetchone()[0]
         conn.commit()
