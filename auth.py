@@ -1160,6 +1160,7 @@ def get_leaderboard():
 @jwt_required(optional=True)
 def get_challenges():
     user_id = get_jwt_identity()
+    solved_question_ids = []
     try:
         conn = get_db_connection()
         cur = conn.cursor()
