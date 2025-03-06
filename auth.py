@@ -812,6 +812,47 @@ def refresh():
 
 
 # ✅ Get User Profile
+# @app.route("/profile", methods=["GET"])
+# @jwt_required()
+# def get_profile():
+#     user_id = get_jwt_identity()
+
+#     try:
+#         conn = get_db_connection()
+#         cur = conn.cursor()
+
+#         # Fetch user details and XP
+#         cur.execute("SELECT username, email, xp FROM users WHERE id = %s;", (user_id,))
+#         user = cur.fetchone()
+
+#         if not user:
+#             return jsonify({"error": "User not found"}), 404
+
+#         # Fetch user statistics
+#         cur.execute("""
+#             SELECT COUNT(*) AS total_submissions,
+#                    SUM(CASE WHEN is_correct THEN 1 ELSE 0 END) AS correct_submissions,
+#                    COUNT(DISTINCT question_id) AS unique_questions_solved
+#             FROM user_answers WHERE user_id = %s;
+#         """, (user_id,))
+        
+#         stats = cur.fetchone()
+#         cur.close()
+#         conn.close()
+
+#         return jsonify({
+#             "username": user[0],
+#             "email": user[1],
+#             "xp": user[2],  # Include XP in response
+#             "total_submissions": stats[0],
+#             "correct_submissions": stats[1],
+#             "unique_questions_solved": stats[2]
+#         }), 200
+
+#     except Exception as e:
+#         return jsonify({"error": str(e)}), 500
+
+
 @app.route("/profile", methods=["GET"])
 @jwt_required()
 def get_profile():
@@ -821,32 +862,84 @@ def get_profile():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Fetch user details and XP
-        cur.execute("SELECT username, email, xp FROM users WHERE id = %s;", (user_id,))
+        # ✅ Fetch user details, XP, and account creation date
+        cur.execute("SELECT username, email, xp, created_at FROM users WHERE id = %s;", (user_id,))
         user = cur.fetchone()
 
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        # Fetch user statistics
+        username, email, xp, created_at = user
+
+        # ✅ Fetch user statistics (total submissions, correct answers, unique questions solved)
         cur.execute("""
             SELECT COUNT(*) AS total_submissions,
                    SUM(CASE WHEN is_correct THEN 1 ELSE 0 END) AS correct_submissions,
                    COUNT(DISTINCT question_id) AS unique_questions_solved
             FROM user_answers WHERE user_id = %s;
         """, (user_id,))
-        
         stats = cur.fetchone()
+        total_submissions, correct_submissions, unique_questions_solved = stats
+
+        # ✅ Calculate accuracy (handle zero submissions case)
+        accuracy = round((correct_submissions / total_submissions) * 100, 2) if total_submissions > 0 else 0
+
+        # ✅ Fetch user rank (Leaderboard Position)
+        cur.execute("""
+            SELECT rank FROM (
+                SELECT id, username, xp, RANK() OVER (ORDER BY xp DESC) AS rank
+                FROM users
+            ) ranked_users
+            WHERE id = %s;
+        """, (user_id,))
+        rank_result = cur.fetchone()
+        user_rank = rank_result[0] if rank_result else None
+
+        # ✅ Fetch fastest query execution time
+        cur.execute("""
+            SELECT MIN(execution_time) FROM user_answers WHERE user_id = %s;
+        """, (user_id,))
+        fastest_time = cur.fetchone()[0]
+
+        # ✅ Fetch recent activity (last 3 submissions)
+        cur.execute("""
+            SELECT q.question, ua.submitted_at 
+            FROM user_answers ua
+            JOIN questions q ON ua.question_id = q.id
+            WHERE ua.user_id = %s
+            ORDER BY ua.submitted_at DESC
+            LIMIT 3;
+        """, (user_id,))
+        recent_activity = [{"question": row[0], "submitted_at": row[1]} for row in cur.fetchall()]
+
+        # ✅ Fetch daily streak (consecutive days of activity)
+        cur.execute("""
+            WITH user_dates AS (
+                SELECT DISTINCT DATE(submitted_at) AS submission_date
+                FROM user_answers
+                WHERE user_id = %s
+            )
+            SELECT COUNT(*) FROM user_dates 
+            WHERE submission_date >= CURRENT_DATE - INTERVAL '7 days';
+        """, (user_id,))
+        daily_streak = cur.fetchone()[0]
+
         cur.close()
         conn.close()
 
         return jsonify({
-            "username": user[0],
-            "email": user[1],
-            "xp": user[2],  # Include XP in response
-            "total_submissions": stats[0],
-            "correct_submissions": stats[1],
-            "unique_questions_solved": stats[2]
+            "username": username,
+            "email": email,
+            "xp": xp,
+            "total_submissions": total_submissions,
+            "correct_submissions": correct_submissions,
+            "unique_questions_solved": unique_questions_solved,
+            "accuracy": accuracy,
+            "rank": user_rank,
+            "fastest_query_time": fastest_time,
+            "recent_activity": recent_activity,
+            "daily_streak": daily_streak,
+            "member_since": created_at.strftime("%B %Y")  # Format as "March 2025"
         }), 200
 
     except Exception as e:
