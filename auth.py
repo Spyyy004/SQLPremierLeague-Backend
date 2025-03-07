@@ -43,11 +43,10 @@ DB_HOST = "localhost"
 DB_PORT = "5432"
 
 DATABASE_URL = os.getenv("DATABASE_URL_SUPABASE")
-
 try:
     connection_pool = pool.SimpleConnectionPool(
         minconn=1,  # Minimum number of connections
-        maxconn=10,  # Maximum number of connections
+        maxconn=100,  # Maximum number of connections
         dsn=DATABASE_URL
     )
     print("✅ Connection pool created successfully!")
@@ -62,6 +61,7 @@ def get_db_connection():
         return conn
     except Exception as e:
         print(f"❌ Error getting database connection: {e}")
+
 
 @app.route("/challenge-of-the-day", methods=["GET"])
 def challenge_of_the_day():
