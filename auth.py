@@ -13,7 +13,7 @@ from datetime import time
 import time as timer
 from sql_metadata import Parser
 import uuid
-import requests
+
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app, supports_credentials=True,resources={r"/*": {"origins": ["https://sqlpremierleague.com", "http://localhost:3000"]}})
