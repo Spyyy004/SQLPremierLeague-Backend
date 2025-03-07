@@ -1226,34 +1226,92 @@ def get_leaderboard():
         return jsonify({"error": str(e)}), 500
 
 
+# @app.route("/challenges", methods=["GET"])
+# @jwt_required(optional=True)
+# def get_challenges():
+#     user_id = get_jwt_identity()
+#     solved_question_ids = []
+#     try:
+#         conn = get_db_connection()
+#         cur = conn.cursor()
+
+#         # Get the category parameter from the query string (if provided)
+#         category = request.args.get("category")
+#         if category:
+#             # Filter challenges by the provided category
+#             cur.execute("""
+#                 SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
+#                 FROM questions q
+#                 LEFT JOIN user_answers ua ON q.id = ua.question_id
+#                 WHERE q.category = %s
+#                 GROUP BY q.id;
+#             """, (category,))
+#         else:
+#             cur.execute("""
+#                 SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
+#                 FROM questions q
+#                 LEFT JOIN user_answers ua ON q.id = ua.question_id
+#                 GROUP BY q.id;
+#             """)
+#         challenges = cur.fetchall()
+
+#         if user_id is not None:
+#             # Fetch the list of question IDs that the user has solved
+#             cur.execute("""
+#                 SELECT question_id FROM user_answers 
+#                 WHERE user_id = %s AND is_correct = true;
+#             """, (user_id,))
+#             solved_questions = cur.fetchall()
+
+#             # Extract question IDs from the result
+#             solved_question_ids = [question[0] for question in solved_questions]
+#         cur.close()
+#         conn.close()
+
+#         challenge_list = [
+#             {"id": q[0], "question": q[1], "type": q[2], "submissions": q[3]} for q in challenges
+#         ]
+        
+#         return jsonify({"challenges": challenge_list,"solved_question_ids":solved_question_ids}), 200
+
+#     except Exception as e:
+#         return jsonify({"error": str(e)}), 500
+
+
 @app.route("/challenges", methods=["GET"])
 @jwt_required(optional=True)
 def get_challenges():
     user_id = get_jwt_identity()
     solved_question_ids = []
+    
     try:
         conn = get_db_connection()
         cur = conn.cursor()
 
         # Get the category parameter from the query string (if provided)
         category = request.args.get("category")
-        if category:
-            # Filter challenges by the provided category
-            cur.execute("""
-                SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
-                FROM questions q
-                LEFT JOIN user_answers ua ON q.id = ua.question_id
-                WHERE q.category = %s
-                GROUP BY q.id;
-            """, (category,))
+
+        if category == "popular":
+            # Fetch the most popular questions
+            challenges = get_most_popular_questions(cur)
         else:
-            cur.execute("""
-                SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
-                FROM questions q
-                LEFT JOIN user_answers ua ON q.id = ua.question_id
-                GROUP BY q.id;
-            """)
-        challenges = cur.fetchall()
+            if category:
+                # Filter challenges by the provided category
+                cur.execute("""
+                    SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
+                    FROM questions q
+                    LEFT JOIN user_answers ua ON q.id = ua.question_id
+                    WHERE q.category = %s
+                    GROUP BY q.id;
+                """, (category,))
+            else:
+                cur.execute("""
+                    SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
+                    FROM questions q
+                    LEFT JOIN user_answers ua ON q.id = ua.question_id
+                    GROUP BY q.id;
+                """)
+            challenges = cur.fetchall()
 
         if user_id is not None:
             # Fetch the list of question IDs that the user has solved
@@ -1265,6 +1323,7 @@ def get_challenges():
 
             # Extract question IDs from the result
             solved_question_ids = [question[0] for question in solved_questions]
+        
         cur.close()
         conn.close()
 
@@ -1272,10 +1331,40 @@ def get_challenges():
             {"id": q[0], "question": q[1], "type": q[2], "submissions": q[3]} for q in challenges
         ]
         
-        return jsonify({"challenges": challenge_list,"solved_question_ids":solved_question_ids}), 200
+        return jsonify({"challenges": challenge_list, "solved_question_ids": solved_question_ids}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+def get_most_popular_questions(cur):
+    """
+    Fetches the 6 most solved and 4 least solved questions.
+    """
+    # Fetch the 6 most solved questions
+    cur.execute("""
+        SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
+        FROM questions q
+        LEFT JOIN user_answers ua ON q.id = ua.question_id
+        GROUP BY q.id
+        ORDER BY submissions DESC
+        LIMIT 6;
+    """)
+    most_solved = cur.fetchall()
+
+    # Fetch the 4 least solved questions
+    cur.execute("""
+        SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
+        FROM questions q
+        LEFT JOIN user_answers ua ON q.id = ua.question_id
+        GROUP BY q.id
+        ORDER BY submissions ASC
+        LIMIT 4;
+    """)
+    least_solved = cur.fetchall()
+
+    return most_solved + least_solved  # Combine results
+
 
 # ✅ Fetch User Progress (Total Questions Attempted)
 @app.route("/progress", methods=["GET"])
