@@ -1,17 +1,19 @@
 from flask import Flask, request, jsonify, make_response
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import create_access_token, jwt_required, create_refresh_token, JWTManager, get_jwt_identity, verify_jwt_in_request
-import psycopg2
+from psycopg2 import pool
 import os
 from flask_cors import CORS
 import secrets
 from datetime import time
 import datetime
+import psycopg2
 import re
 from datetime import time
 import time as timer
 from sql_metadata import Parser
 import uuid
+import requests
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app, supports_credentials=True,resources={r"/*": {"origins": ["https://sqlpremierleague.com", "http://localhost:3000"]}})
@@ -40,10 +42,26 @@ DB_PASSWORD = "13052000"
 DB_HOST = "localhost"
 DB_PORT = "5432"
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL_SUPABASE")
+
+try:
+    connection_pool = pool.SimpleConnectionPool(
+        minconn=1,  # Minimum number of connections
+        maxconn=10,  # Maximum number of connections
+        dsn=DATABASE_URL
+    )
+    print("✅ Connection pool created successfully!")
+except Exception as e:
+    print(f"❌ Error creating connection pool: {e}")
 
 def get_db_connection():
-    return psycopg2.connect(DATABASE_URL)
+    try:
+        conn = connection_pool.getconn()
+        if conn:
+            print("✅ Database connection acquired")
+        return conn
+    except Exception as e:
+        print(f"❌ Error getting database connection: {e}")
 
 @app.route("/challenge-of-the-day", methods=["GET"])
 def challenge_of_the_day():
@@ -810,47 +828,6 @@ def refresh():
             )
     return response
 
-
-# ✅ Get User Profile
-# @app.route("/profile", methods=["GET"])
-# @jwt_required()
-# def get_profile():
-#     user_id = get_jwt_identity()
-
-#     try:
-#         conn = get_db_connection()
-#         cur = conn.cursor()
-
-#         # Fetch user details and XP
-#         cur.execute("SELECT username, email, xp FROM users WHERE id = %s;", (user_id,))
-#         user = cur.fetchone()
-
-#         if not user:
-#             return jsonify({"error": "User not found"}), 404
-
-#         # Fetch user statistics
-#         cur.execute("""
-#             SELECT COUNT(*) AS total_submissions,
-#                    SUM(CASE WHEN is_correct THEN 1 ELSE 0 END) AS correct_submissions,
-#                    COUNT(DISTINCT question_id) AS unique_questions_solved
-#             FROM user_answers WHERE user_id = %s;
-#         """, (user_id,))
-        
-#         stats = cur.fetchone()
-#         cur.close()
-#         conn.close()
-
-#         return jsonify({
-#             "username": user[0],
-#             "email": user[1],
-#             "xp": user[2],  # Include XP in response
-#             "total_submissions": stats[0],
-#             "correct_submissions": stats[1],
-#             "unique_questions_solved": stats[2]
-#         }), 200
-
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/profile", methods=["GET"])
