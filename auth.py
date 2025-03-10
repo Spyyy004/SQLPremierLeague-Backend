@@ -1289,7 +1289,7 @@ def get_challenges():
             if category:
                 # Filter challenges by the provided category
                 cur.execute("""
-                    SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
+                    SELECT q.id, q.question, q.type,q.category, COUNT(ua.id) AS submissions
                     FROM questions q
                     LEFT JOIN user_answers ua ON q.id = ua.question_id
                     WHERE q.category = %s
