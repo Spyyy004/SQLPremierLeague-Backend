@@ -1250,9 +1250,10 @@ def google_login():
 
         if not user:
             # Create a new user
+            placeholder_password = "GOOGLE_LOGIN"
             cur.execute(
-                "INSERT INTO users (username, email) VALUES (%s, %s) RETURNING id;",
-                (name, email)
+                "INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s) RETURNING id;",
+                (name, email, placeholder_password)
             )
             user_id = cur.fetchone()[0]
             conn.commit()
