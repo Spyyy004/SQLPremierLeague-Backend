@@ -6,3 +6,4 @@ gunicorn
 flask_cors
 sql-metadata
 flask-jwt-extended
+google-auth

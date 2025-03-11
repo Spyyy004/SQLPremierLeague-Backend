@@ -10,6 +10,8 @@ import datetime
 import psycopg2
 import re
 from datetime import time
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 import time as timer
 from sql_metadata import Parser
 import uuid
@@ -1217,57 +1219,68 @@ def get_leaderboard():
         return jsonify({"error": str(e)}), 500
 
 
-# @app.route("/challenges", methods=["GET"])
-# @jwt_required(optional=True)
-# def get_challenges():
-#     user_id = get_jwt_identity()
-#     solved_question_ids = []
-#     try:
-#         conn = get_db_connection()
-#         cur = conn.cursor()
 
-#         # Get the category parameter from the query string (if provided)
-#         category = request.args.get("category")
-#         if category:
-#             # Filter challenges by the provided category
-#             cur.execute("""
-#                 SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
-#                 FROM questions q
-#                 LEFT JOIN user_answers ua ON q.id = ua.question_id
-#                 WHERE q.category = %s
-#                 GROUP BY q.id;
-#             """, (category,))
-#         else:
-#             cur.execute("""
-#                 SELECT q.id, q.question, q.type, COUNT(ua.id) AS submissions
-#                 FROM questions q
-#                 LEFT JOIN user_answers ua ON q.id = ua.question_id
-#                 GROUP BY q.id;
-#             """)
-#         challenges = cur.fetchall()
+@app.route("/google-login", methods=["POST"])
+def google_login():
+    # Get the credential from the request
+    credential = request.json.get("credential")
+    if not credential:
+        return jsonify({"error": "Credential is required"}), 400
 
-#         if user_id is not None:
-#             # Fetch the list of question IDs that the user has solved
-#             cur.execute("""
-#                 SELECT question_id FROM user_answers 
-#                 WHERE user_id = %s AND is_correct = true;
-#             """, (user_id,))
-#             solved_questions = cur.fetchall()
+    try:
+        # Specify the CLIENT_ID of the app that accesses the backend
+        CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
-#             # Extract question IDs from the result
-#             solved_question_ids = [question[0] for question in solved_questions]
-#         cur.close()
-#         conn.close()
+        # Verify the token
+        idinfo = id_token.verify_oauth2_token(credential, google_requests.Request(), CLIENT_ID)
 
-#         challenge_list = [
-#             {"id": q[0], "question": q[1], "type": q[2], "submissions": q[3]} for q in challenges
-#         ]
-        
-#         return jsonify({"challenges": challenge_list,"solved_question_ids":solved_question_ids}), 200
+        # ID token is valid. Get the user's Google Account ID from the decoded token.
+        user_id = idinfo['sub']
+        email = idinfo.get('email')
+        name = idinfo.get('name')
 
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
+        # Here, you can check if the user exists in your database and create a new user if not
+        # For example:
+        conn = get_db_connection()
+        cur = conn.cursor()
 
+        # Check if user already exists
+        cur.execute("SELECT id FROM users WHERE email = %s;", (email,))
+        user = cur.fetchone()
+
+        if not user:
+            # Create a new user
+            cur.execute(
+                "INSERT INTO users (username, email) VALUES (%s, %s) RETURNING id;",
+                (name, email)
+            )
+            user_id = cur.fetchone()[0]
+            conn.commit()
+        else:
+            user_id = user[0]
+
+        cur.close()
+        conn.close()
+        access_token = create_access_token(identity=str(user_id))
+        refresh_token = create_refresh_token(identity=str(user_id))
+        csrf_token = generate_csrf_token()
+        response = make_response(jsonify({"message": "Login successful","user_id":user_id}))
+        response.set_cookie(
+        "access_token", access_token,
+        httponly=True, samesite="None", secure=True  # Secure=True for HTTPS
+        )
+        response.set_cookie(
+        "refresh_token", refresh_token,
+        httponly=True, samesite="None", secure=True
+        )
+        response.set_cookie("csrf_token", csrf_token, httponly=False, secure=True, samesite="None")
+        return response
+
+    except ValueError as e:
+        # Invalid token
+        return jsonify({"error": "Invalid token"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/challenges", methods=["GET"])
 @jwt_required(optional=True)
