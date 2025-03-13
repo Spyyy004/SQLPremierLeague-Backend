@@ -367,16 +367,13 @@ def start_test():
         conn.commit()
 
         # Fetch initial questions
-        # Updated to fetch 2 Easy, 2 Medium, and 1 Hard questions
         first_question = fetch_question_with_schema("easy")
         second_question = fetch_question_with_schema("easy")
         third_question = fetch_question_with_schema("medium")
-        fourth_question = fetch_question_with_schema("medium")
-        fifth_question = fetch_question_with_schema("hard")
 
         return jsonify({
             "test_session_id": test_session_id,
-            "questions": [first_question, second_question, third_question, fourth_question, fifth_question],
+            "questions": [first_question, second_question, third_question],
         }), 200
 
     except Exception as e:
@@ -390,7 +387,7 @@ def start_test():
 @app.route("/next-question", methods=["POST"])
 def next_question():
     """
-    Updates the user's score based on:
+    Returns 2 new questions with table schemas based on:
     - Whether the last answer was correct
     - How many total correct answers the user has given
     - Gradual difficulty progression based on score
@@ -406,26 +403,24 @@ def next_question():
     if score is None or correct_answers is None:
         return jsonify({"error": "Score and correct answers count are required"}), 400
 
-    # 🔥 Update the user's score based on the provided data
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
+    # 🔥 Adjust difficulty based on overall progress
+    if score < 20:
+        difficulty = "easy"  # 🔥 Keep showing easy questions initially
+    elif 20 <= score < 40:
+        difficulty = "medium" if answered_correctly else "easy"  # 🔥 Introduce medium questions
+    elif 50 <= score < 70:
+        difficulty = "medium" if answered_correctly else "medium"  # 🔥 Mostly medium questions
+    else:
+        difficulty = "hard" if answered_correctly else "medium"  # 🔥 Gradual increase to hard
 
-        # Update the user's score in the database
-        cur.execute("""
-            UPDATE test_sessions 
-            SET score = %s 
-            WHERE id = %s;
-        """, (score, test_id))
-        conn.commit()
+    # ✅ Fetch two new questions dynamically
+    next_question = fetch_question_with_schema(difficulty)
+    backup_question = fetch_question_with_schema("medium" if difficulty == "hard" else "easy")
 
-        return jsonify({"message": "Score updated successfully"}), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if conn:
-            conn.close()
+    return jsonify({
+        "test_id": test_id,  # 🔥 Return test_id for tracking
+        "questions": [next_question, backup_question],
+    }), 200
 
 def assign_badge(correct_answers, total_questions):
     """
@@ -1315,6 +1310,7 @@ def get_challenges():
                 SELECT q.id, q.question, q.type, q.category, COUNT(ua.id) AS submissions
                 FROM questions q
                 LEFT JOIN user_answers ua ON q.id = ua.question_id
+                WHERE q.type = 'easy'
                 GROUP BY q.id;
             """)
             challenges = cur.fetchall()
