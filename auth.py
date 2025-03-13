@@ -1293,6 +1293,13 @@ def get_challenges():
         conn = get_db_connection()
         cur = conn.cursor()
 
+        # Check if the user is premium
+        has_premium = False
+        if user_id:
+            cur.execute("SELECT is_premium FROM users WHERE id = %s;", (user_id,))
+            premium_status = cur.fetchone()
+            has_premium = premium_status[0] if premium_status else False
+
         # Get the category parameter from the query string (if provided)
         category = request.args.get("category")
 
@@ -1336,7 +1343,7 @@ def get_challenges():
             {"id": q[0], "question": q[1], "type": q[2], "submissions": q[4], "category":q[3]} for q in challenges
         ]
         
-        return jsonify({"challenges": challenge_list, "solved_question_ids": solved_question_ids}), 200
+        return jsonify({"challenges": challenge_list, "solved_question_ids": solved_question_ids, "user_premium_status": True}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
