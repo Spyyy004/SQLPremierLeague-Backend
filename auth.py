@@ -1283,6 +1283,7 @@ def google_login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/challenges", methods=["GET"])
 @jwt_required(optional=True)
 def get_challenges():
@@ -1303,27 +1304,38 @@ def get_challenges():
         # Get the category parameter from the query string (if provided)
         category = request.args.get("category")
 
-        if category == "popular":
-            # Fetch the most popular questions
-            challenges = get_most_popular_questions(cur)
-        else:
-            if category:
-                # Filter challenges by the provided category
-                cur.execute("""
-                    SELECT q.id, q.question, q.type,q.category, COUNT(ua.id) AS submissions
-                    FROM questions q
-                    LEFT JOIN user_answers ua ON q.id = ua.question_id
-                    WHERE q.category = %s
-                    GROUP BY q.id;
-                """, (category,))
-            else:
-                cur.execute("""
-                    SELECT q.id, q.question, q.type, q.category, COUNT(ua.id) AS submissions
-                    FROM questions q
-                    LEFT JOIN user_answers ua ON q.id = ua.question_id
-                    GROUP BY q.id;
-                """)
+        if user_id is None:
+            # If user is not logged in, fetch only easy questions with submission count
+            cur.execute("""
+                SELECT q.id, q.question, q.type, q.category, COUNT(ua.id) AS submissions
+                FROM questions q
+                LEFT JOIN user_answers ua ON q.id = ua.question_id
+                WHERE q.type = 'easy'
+                GROUP BY q.id;
+            """)
             challenges = cur.fetchall()
+        else:
+            if category == "popular":
+                # Fetch the most popular questions
+                challenges = get_most_popular_questions(cur)
+            else:
+                if category:
+                    # Filter challenges by the provided category
+                    cur.execute("""
+                        SELECT q.id, q.question, q.type, q.category, COUNT(ua.id) AS submissions
+                        FROM questions q
+                        LEFT JOIN user_answers ua ON q.id = ua.question_id
+                        WHERE q.category = %s
+                        GROUP BY q.id;
+                    """, (category,))
+                else:
+                    cur.execute("""
+                        SELECT q.id, q.question, q.type, q.category, COUNT(ua.id) AS submissions
+                        FROM questions q
+                        LEFT JOIN user_answers ua ON q.id = ua.question_id
+                        GROUP BY q.id;
+                    """)
+                challenges = cur.fetchall()
 
         if user_id is not None:
             # Fetch the list of question IDs that the user has solved
@@ -1340,13 +1352,80 @@ def get_challenges():
         conn.close()
 
         challenge_list = [
-            {"id": q[0], "question": q[1], "type": q[2], "submissions": q[4], "category":q[3]} for q in challenges
+            {"id": q[0], "question": q[1], "type": q[2], "category": q[3], "submissions": q[4]} for q in challenges
         ]
         
-        return jsonify({"challenges": challenge_list, "solved_question_ids": solved_question_ids, "user_premium_status": True}), 200
+        return jsonify({"challenges": challenge_list, "solved_question_ids": solved_question_ids, "user_premium_status": has_premium}), 200
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # Log the error for debugging
+        print(f"Error occurred: {str(e)}")
+        return jsonify({"error": "An error occurred while processing your request.", "details": str(e)}), 500
+
+# @app.route("/challenges", methods=["GET"])
+# @jwt_required(optional=True)
+# def get_challenges():
+#     user_id = get_jwt_identity()
+#     solved_question_ids = []
+    
+#     try:
+#         conn = get_db_connection()
+#         cur = conn.cursor()
+
+#         # Check if the user is premium
+#         has_premium = False
+#         if user_id:
+#             cur.execute("SELECT is_premium FROM users WHERE id = %s;", (user_id,))
+#             premium_status = cur.fetchone()
+#             has_premium = premium_status[0] if premium_status else False
+
+#         # Get the category parameter from the query string (if provided)
+#         category = request.args.get("category")
+
+#         if category == "popular":
+#             # Fetch the most popular questions
+#             challenges = get_most_popular_questions(cur)
+#         else:
+#             if category:
+#                 # Filter challenges by the provided category
+#                 cur.execute("""
+#                     SELECT q.id, q.question, q.type,q.category, COUNT(ua.id) AS submissions
+#                     FROM questions q
+#                     LEFT JOIN user_answers ua ON q.id = ua.question_id
+#                     WHERE q.category = %s
+#                     GROUP BY q.id;
+#                 """, (category,))
+#             else:
+#                 cur.execute("""
+#                     SELECT q.id, q.question, q.type, q.category, COUNT(ua.id) AS submissions
+#                     FROM questions q
+#                     LEFT JOIN user_answers ua ON q.id = ua.question_id
+#                     GROUP BY q.id;
+#                 """)
+#             challenges = cur.fetchall()
+
+#         if user_id is not None:
+#             # Fetch the list of question IDs that the user has solved
+#             cur.execute("""
+#                 SELECT question_id FROM user_answers 
+#                 WHERE user_id = %s AND is_correct = true;
+#             """, (user_id,))
+#             solved_questions = cur.fetchall()
+
+#             # Extract question IDs from the result
+#             solved_question_ids = [question[0] for question in solved_questions]
+        
+#         cur.close()
+#         conn.close()
+
+#         challenge_list = [
+#             {"id": q[0], "question": q[1], "type": q[2], "submissions": q[4], "category":q[3]} for q in challenges
+#         ]
+        
+#         return jsonify({"challenges": challenge_list, "solved_question_ids": solved_question_ids, "user_premium_status": True}), 200
+
+#     except Exception as e:
+#         return jsonify({"error": str(e)}), 500
 
 
 def get_most_popular_questions(cur):
