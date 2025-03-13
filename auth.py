@@ -1303,38 +1303,27 @@ def get_challenges():
         # Get the category parameter from the query string (if provided)
         category = request.args.get("category")
 
-        if user_id is None:
-            # If user is not logged in, fetch only easy questions
-            cur.execute("""
-                SELECT q.id, q.question, q.type, q.category, COUNT(ua.id) AS submissions
-                FROM questions q
-                LEFT JOIN user_answers ua ON q.id = ua.question_id
-                WHERE q.type = 'easy'
-                GROUP BY q.id;
-            """)
-            challenges = cur.fetchall()
+        if category == "popular":
+            # Fetch the most popular questions
+            challenges = get_most_popular_questions(cur)
         else:
-            if category == "popular":
-                # Fetch the most popular questions
-                challenges = get_most_popular_questions(cur)
+            if category:
+                # Filter challenges by the provided category
+                cur.execute("""
+                    SELECT q.id, q.question, q.type,q.category, COUNT(ua.id) AS submissions
+                    FROM questions q
+                    LEFT JOIN user_answers ua ON q.id = ua.question_id
+                    WHERE q.category = %s
+                    GROUP BY q.id;
+                """, (category,))
             else:
-                if category:
-                    # Filter challenges by the provided category
-                    cur.execute("""
-                        SELECT q.id, q.question, q.type, q.category, COUNT(ua.id) AS submissions
-                        FROM questions q
-                        LEFT JOIN user_answers ua ON q.id = ua.question_id
-                        WHERE q.category = %s
-                        GROUP BY q.id;
-                    """, (category,))
-                else:
-                    cur.execute("""
-                        SELECT q.id, q.question, q.type, q.category, COUNT(ua.id) AS submissions
-                        FROM questions q
-                        LEFT JOIN user_answers ua ON q.id = ua.question_id
-                        GROUP BY q.id;
-                    """)
-                challenges = cur.fetchall()
+                cur.execute("""
+                    SELECT q.id, q.question, q.type, q.category, COUNT(ua.id) AS submissions
+                    FROM questions q
+                    LEFT JOIN user_answers ua ON q.id = ua.question_id
+                    GROUP BY q.id;
+                """)
+            challenges = cur.fetchall()
 
         if user_id is not None:
             # Fetch the list of question IDs that the user has solved
@@ -1354,7 +1343,7 @@ def get_challenges():
             {"id": q[0], "question": q[1], "type": q[2], "submissions": q[4], "category":q[3]} for q in challenges
         ]
         
-        return jsonify({"challenges": challenge_list, "solved_question_ids": solved_question_ids, "has_premium": has_premium}), 200
+        return jsonify({"challenges": challenge_list, "solved_question_ids": solved_question_ids, "user_premium_status": True}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
