@@ -367,13 +367,16 @@ def start_test():
         conn.commit()
 
         # Fetch initial questions
+        # Updated to fetch 2 Easy, 2 Medium, and 1 Hard questions
         first_question = fetch_question_with_schema("easy")
         second_question = fetch_question_with_schema("easy")
         third_question = fetch_question_with_schema("medium")
+        fourth_question = fetch_question_with_schema("medium")
+        fifth_question = fetch_question_with_schema("hard")
 
         return jsonify({
             "test_session_id": test_session_id,
-            "questions": [first_question, second_question, third_question],
+            "questions": [first_question, second_question, third_question, fourth_question, fifth_question],
         }), 200
 
     except Exception as e:
@@ -387,7 +390,7 @@ def start_test():
 @app.route("/next-question", methods=["POST"])
 def next_question():
     """
-    Returns 2 new questions with table schemas based on:
+    Updates the user's score based on:
     - Whether the last answer was correct
     - How many total correct answers the user has given
     - Gradual difficulty progression based on score
@@ -403,24 +406,26 @@ def next_question():
     if score is None or correct_answers is None:
         return jsonify({"error": "Score and correct answers count are required"}), 400
 
-    # 🔥 Adjust difficulty based on overall progress
-    if score < 20:
-        difficulty = "easy"  # 🔥 Keep showing easy questions initially
-    elif 20 <= score < 40:
-        difficulty = "medium" if answered_correctly else "easy"  # 🔥 Introduce medium questions
-    elif 50 <= score < 70:
-        difficulty = "medium" if answered_correctly else "medium"  # 🔥 Mostly medium questions
-    else:
-        difficulty = "hard" if answered_correctly else "medium"  # 🔥 Gradual increase to hard
+    # 🔥 Update the user's score based on the provided data
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
 
-    # ✅ Fetch two new questions dynamically
-    next_question = fetch_question_with_schema(difficulty)
-    backup_question = fetch_question_with_schema("medium" if difficulty == "hard" else "easy")
+        # Update the user's score in the database
+        cur.execute("""
+            UPDATE test_sessions 
+            SET score = %s 
+            WHERE id = %s;
+        """, (score, test_id))
+        conn.commit()
 
-    return jsonify({
-        "test_id": test_id,  # 🔥 Return test_id for tracking
-        "questions": [next_question, backup_question],
-    }), 200
+        return jsonify({"message": "Score updated successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
 
 def assign_badge(correct_answers, total_questions):
     """
@@ -1310,7 +1315,6 @@ def get_challenges():
                 SELECT q.id, q.question, q.type, q.category, COUNT(ua.id) AS submissions
                 FROM questions q
                 LEFT JOIN user_answers ua ON q.id = ua.question_id
-                WHERE q.type = 'easy'
                 GROUP BY q.id;
             """)
             challenges = cur.fetchall()
@@ -1843,12 +1847,16 @@ def claim_test(test_session_id):
         if conn:
             conn.close()
 
+
+
 @app.route("/test-report/<test_session_id>", methods=["GET"])
 @jwt_required()  # Requires authentication
 def get_test_report(test_session_id):
     """
     Fetches complete test report for a logged-in user.
     Only shows reports for tests associated with the requesting user.
+    For premium users, the report includes detailed per-question data.
+    For free users, only high-level summary and limited per-question details are shown.
     """
     user_id = get_jwt_identity()
 
@@ -1856,7 +1864,7 @@ def get_test_report(test_session_id):
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # First verify this test belongs to the requesting user
+        # First, fetch the test session details and verify ownership
         cur.execute("""
             SELECT user_id, score, badge, start_time, end_time 
             FROM test_sessions 
@@ -1864,13 +1872,17 @@ def get_test_report(test_session_id):
         """, (test_session_id,))
         
         test_session = cur.fetchone()
-        
         if not test_session:
             return jsonify({"error": "Test session not found"}), 404
             
         session_user_id = test_session[0]
         if str(session_user_id) != str(user_id):
             return jsonify({"error": "Unauthorized access to test report"}), 403
+
+        # Check if the user is premium
+        cur.execute("SELECT is_premium FROM users WHERE id = %s;", (user_id,))
+        premium_row = cur.fetchone()
+        is_premium = premium_row[0] if premium_row else False
 
         # Get all attempts with question details
         cur.execute("""
@@ -1892,56 +1904,74 @@ def get_test_report(test_session_id):
         
         attempts = cur.fetchall()
 
-        # Calculate statistics
+        # Calculate overall statistics
         total_questions = len(attempts)
-        correct_answers = sum(1 for attempt in attempts if attempt[6])  # is_correct
+        correct_answers = sum(1 for attempt in attempts if attempt[6])
         accuracy = round((correct_answers / total_questions * 100), 2) if total_questions > 0 else 0
-        
-        # Get table schemas for each question
+
         question_details = []
         for attempt in attempts:
-            question_id = attempt[0]
-            
-            # Extract tables from correct query
-            required_tables = extract_table_names(attempt[4])  # correct_query
-            table_data = extract_table_data(required_tables)
-            
-            question_details.append({
-                "question_id": question_id,
-                "question_text": attempt[1],
-                "type": attempt[2],
-                "category": attempt[3],
-                "correct_query": attempt[4],
-                "user_query": attempt[5],
-                "is_correct": attempt[6],
-                "execution_time": attempt[7],
-                "attempted_at": attempt[8],
-                "table_schemas": table_data
-            })
+            # Premium users see all details
+            if is_premium:
+                required_tables = extract_table_names(attempt[4])  # correct_query
+                table_data = extract_table_data(required_tables)
+                question_detail = {
+                    "question_id": attempt[0],
+                    "question_text": attempt[1],
+                    "type": attempt[2],
+                    "category": attempt[3],
+                    "correct_query": attempt[4],
+                    "user_query": attempt[5],
+                    "is_correct": attempt[6],
+                    "execution_time": attempt[7],
+                    "attempted_at": attempt[8],
+                    "table_schemas": table_data
+                }
+            else:
+                # Free users get limited details (hide sensitive details)
+                question_detail = {
+                    "question_id": attempt[0],
+                    "question_text": attempt[1],
+                    "type": attempt[2],
+                    "category": attempt[3],
+                    "is_correct": attempt[6],
+                    "attempted_at": attempt[8]
+                }
+            question_details.append(question_detail)
 
-        return jsonify({
-            "test_summary": {
-                "test_session_id": test_session_id,
-                "score": test_session[1],  # score
-                "badge": test_session[2],  # badge
-                "start_time": test_session[3],
-                "end_time": test_session[4],
-                "total_questions": total_questions,
-                "correct_answers": correct_answers,
-                "accuracy": accuracy,
-                "completion_time": str(test_session[4] - test_session[3]) if test_session[4] else None
-            },
+        # Build a performance summary
+        performance_summary = {
+            "easy_questions": sum(1 for q in question_details if q["type"] == "easy"),
+            "medium_questions": sum(1 for q in question_details if q["type"] == "medium"),
+            "hard_questions": sum(1 for q in question_details if q["type"] == "hard"),
+            "easy_correct": sum(1 for q in question_details if q["type"] == "easy" and q.get("is_correct")),
+            "medium_correct": sum(1 for q in question_details if q["type"] == "medium" and q.get("is_correct")),
+            "hard_correct": sum(1 for q in question_details if q["type"] == "hard" and q.get("is_correct"))
+        }
+        # Include average execution time only for premium users
+        if is_premium and total_questions > 0:
+            avg_exec_time = round(sum(q["execution_time"] for q in question_details if q.get("execution_time")) / total_questions, 2)
+            performance_summary["avg_execution_time"] = avg_exec_time
+
+        test_summary = {
+            "test_session_id": test_session_id,
+            "score": test_session[1],
+            "badge": test_session[2],
+            "start_time": test_session[3],
+            "end_time": test_session[4],
+            "total_questions": total_questions,
+            "correct_answers": correct_answers,
+            "accuracy": accuracy,
+            "completion_time": str(test_session[4] - test_session[3]) if test_session[4] else None
+        }
+
+        response_data = {
+            "test_summary": test_summary,
             "question_details": question_details,
-            "performance_summary": {
-                "easy_questions": sum(1 for q in question_details if q["type"] == "easy"),
-                "medium_questions": sum(1 for q in question_details if q["type"] == "medium"),
-                "hard_questions": sum(1 for q in question_details if q["type"] == "hard"),
-                "easy_correct": sum(1 for q in question_details if q["type"] == "easy" and q["is_correct"]),
-                "medium_correct": sum(1 for q in question_details if q["type"] == "medium" and q["is_correct"]),
-                "hard_correct": sum(1 for q in question_details if q["type"] == "hard" and q["is_correct"]),
-                "avg_execution_time": round(sum(q["execution_time"] for q in question_details) / len(question_details), 2)
-            }
-        }), 200
+            "performance_summary": performance_summary,
+            "is_premium": is_premium  # Optional flag to help the frontend adjust display
+        }
+        return jsonify(response_data), 200
 
     except Exception as e:
         print("Error in get_test_report:", str(e))
@@ -1949,6 +1979,113 @@ def get_test_report(test_session_id):
     finally:
         if conn:
             conn.close()
+
+# @app.route("/test-report/<test_session_id>", methods=["GET"])
+# @jwt_required()  # Requires authentication
+# def get_test_report(test_session_id):
+#     """
+#     Fetches complete test report for a logged-in user.
+#     Only shows reports for tests associated with the requesting user.
+#     """
+#     user_id = get_jwt_identity()
+
+#     try:
+#         conn = get_db_connection()
+#         cur = conn.cursor()
+
+#         # First verify this test belongs to the requesting user
+#         cur.execute("""
+#             SELECT user_id, score, badge, start_time, end_time 
+#             FROM test_sessions 
+#             WHERE id = %s AND status = 'completed';
+#         """, (test_session_id,))
+        
+#         test_session = cur.fetchone()
+        
+#         if not test_session:
+#             return jsonify({"error": "Test session not found"}), 404
+            
+#         session_user_id = test_session[0]
+#         if str(session_user_id) != str(user_id):
+#             return jsonify({"error": "Unauthorized access to test report"}), 403
+
+#         # Get all attempts with question details
+#         cur.execute("""
+#             SELECT 
+#                 q.id,
+#                 q.question,
+#                 q.type,
+#                 q.category,
+#                 q.correct_query,
+#                 ta.user_query,
+#                 ta.is_correct,
+#                 ta.execution_time,
+#                 ta.attempted_at
+#             FROM test_attempts ta
+#             JOIN questions q ON ta.question_id = q.id
+#             WHERE ta.test_session_id = %s
+#             ORDER BY ta.attempted_at;
+#         """, (test_session_id,))
+        
+#         attempts = cur.fetchall()
+
+#         # Calculate statistics
+#         total_questions = len(attempts)
+#         correct_answers = sum(1 for attempt in attempts if attempt[6])  # is_correct
+#         accuracy = round((correct_answers / total_questions * 100), 2) if total_questions > 0 else 0
+        
+#         # Get table schemas for each question
+#         question_details = []
+#         for attempt in attempts:
+#             question_id = attempt[0]
+            
+#             # Extract tables from correct query
+#             required_tables = extract_table_names(attempt[4])  # correct_query
+#             table_data = extract_table_data(required_tables)
+            
+#             question_details.append({
+#                 "question_id": question_id,
+#                 "question_text": attempt[1],
+#                 "type": attempt[2],
+#                 "category": attempt[3],
+#                 "correct_query": attempt[4],
+#                 "user_query": attempt[5],
+#                 "is_correct": attempt[6],
+#                 "execution_time": attempt[7],
+#                 "attempted_at": attempt[8],
+#                 "table_schemas": table_data
+#             })
+
+#         return jsonify({
+#             "test_summary": {
+#                 "test_session_id": test_session_id,
+#                 "score": test_session[1],  # score
+#                 "badge": test_session[2],  # badge
+#                 "start_time": test_session[3],
+#                 "end_time": test_session[4],
+#                 "total_questions": total_questions,
+#                 "correct_answers": correct_answers,
+#                 "accuracy": accuracy,
+#                 "completion_time": str(test_session[4] - test_session[3]) if test_session[4] else None
+#             },
+#             "question_details": question_details,
+#             "performance_summary": {
+#                 "easy_questions": sum(1 for q in question_details if q["type"] == "easy"),
+#                 "medium_questions": sum(1 for q in question_details if q["type"] == "medium"),
+#                 "hard_questions": sum(1 for q in question_details if q["type"] == "hard"),
+#                 "easy_correct": sum(1 for q in question_details if q["type"] == "easy" and q["is_correct"]),
+#                 "medium_correct": sum(1 for q in question_details if q["type"] == "medium" and q["is_correct"]),
+#                 "hard_correct": sum(1 for q in question_details if q["type"] == "hard" and q["is_correct"]),
+#                 "avg_execution_time": round(sum(q["execution_time"] for q in question_details) / len(question_details), 2)
+#             }
+#         }), 200
+
+#     except Exception as e:
+#         print("Error in get_test_report:", str(e))
+#         return jsonify({"error": "Internal server error"}), 500
+#     finally:
+#         if conn:
+#             conn.close()
 
 @app.route("/report-issue", methods=["POST"])
 def report_issue():
