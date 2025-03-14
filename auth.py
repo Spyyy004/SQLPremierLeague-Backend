@@ -924,99 +924,253 @@ def get_profile():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/quests", methods=["GET"])
+@jwt_required(optional=True)
+def get_quests():
+    """Retrieve all quests available to the user."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
 
-# @app.route("/profile", methods=["GET"])
-# @jwt_required()
-# def get_profile():
-#     user_id = get_jwt_identity()
+        # Fetch all quests
+        cur.execute("SELECT id, name, description, difficulty FROM quests ORDER BY difficulty, id;")
+        quests = [{"id": row[0], "name": row[1], "description": row[2], "difficulty": row[3]} for row in cur.fetchall()]
 
-#     try:
-#         conn = get_db_connection()
-#         cur = conn.cursor()
+        cur.close()
+        conn.close()
+        return jsonify({"quests": quests}), 200
 
-#         # ✅ Fetch user details, XP, and account creation date
-#         cur.execute("SELECT username, email, xp, created_at FROM users WHERE id = %s;", (user_id,))
-#         user = cur.fetchone()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-#         if not user:
-#             return jsonify({"error": "User not found"}), 404
+def serialize_value(value):
+    """Converts PostgreSQL data types to JSON serializable formats."""
+    if isinstance(value, datetime.date):  
+        return value.strftime("%Y-%m-%d")  # Format DATE values
+    elif isinstance(value, datetime.time):
+        return value.strftime("%H:%M:%S")  # Format TIME values
+    return value  # Return as is if no conversion is needed
 
-#         username, email, xp, created_at = user
+# ✅ 2. Fetch details of a specific quest
+@app.route("/quests/<int:quest_id>", methods=["GET"])
+@jwt_required(optional=True)
+def get_quest_details(quest_id):
+    """Retrieve details of a specific quest, including full question details."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
 
-#         # ✅ Fetch user statistics (total submissions, correct answers, unique questions solved)
-#         cur.execute("""
-#             SELECT COUNT(*) AS total_submissions,
-#                    SUM(CASE WHEN is_correct THEN 1 ELSE 0 END) AS correct_submissions,
-#                    COUNT(DISTINCT question_id) AS unique_questions_solved
-#             FROM user_answers WHERE user_id = %s;
-#         """, (user_id,))
-#         stats = cur.fetchone()
-#         total_submissions, correct_submissions, unique_questions_solved = stats
+        # Fetch quest details
+        cur.execute("SELECT id, name, description, difficulty FROM quests WHERE id = %s;", (quest_id,))
+        quest = cur.fetchone()
+        if not quest:
+            return jsonify({"error": "Quest not found"}), 404
 
-#         # ✅ Calculate accuracy (handle zero submissions case)
-#         accuracy = round((correct_submissions / total_submissions) * 100, 2) if total_submissions > 0 else 0
+        quest_data = {
+            "id": quest[0],
+            "name": quest[1],
+            "description": quest[2],
+            "difficulty": quest[3],
+            "questions": []
+        }
 
-#         # ✅ Fetch user rank (Leaderboard Position)
-#         cur.execute("""
-#             SELECT rank FROM (
-#                 SELECT id, username, xp, RANK() OVER (ORDER BY xp DESC) AS rank
-#                 FROM users
-#             ) ranked_users
-#             WHERE id = %s;
-#         """, (user_id,))
-#         rank_result = cur.fetchone()
-#         user_rank = rank_result[0] if rank_result else None
+        # Fetch questions associated with the quest
+        cur.execute("""
+            SELECT q.id, q.question, q.type, q.category, q.correct_query
+            FROM quest_questions qq
+            JOIN questions q ON qq.question_id = q.id
+            WHERE qq.quest_id = %s
+            ORDER BY qq.sequence;
+        """, (quest_id,))
 
-#         # ✅ Fetch fastest query execution time
-#         cur.execute("""
-#             SELECT MIN(execution_time) FROM user_answers WHERE user_id = %s;
-#         """, (user_id,))
-#         fastest_time = cur.fetchone()[0]
+        question_rows = cur.fetchall()
 
-#         # ✅ Fetch recent activity (last 3 submissions)
-#         cur.execute("""
-#             SELECT q.question, ua.submitted_at 
-#             FROM user_answers ua
-#             JOIN questions q ON ua.question_id = q.id
-#             WHERE ua.user_id = %s
-#             ORDER BY ua.submitted_at DESC
-#             LIMIT 3;
-#         """, (user_id,))
-#         recent_activity = [{"question": row[0], "submitted_at": row[1]} for row in cur.fetchall()]
+        for row in question_rows:
+            question_id, question_text, q_type, category, correct_query = row
 
-#         # ✅ Fetch daily streak (consecutive days of activity)
-#         cur.execute("""
-#             WITH user_dates AS (
-#                 SELECT DISTINCT DATE(submitted_at) AS submission_date
-#                 FROM user_answers
-#                 WHERE user_id = %s
-#             )
-#             SELECT COUNT(*) FROM user_dates 
-#             WHERE submission_date >= CURRENT_DATE - INTERVAL '7 days';
-#         """, (user_id,))
-#         daily_streak = cur.fetchone()[0]
+            # Fetch hints from `question_hints` table
+            cur.execute("""
+                SELECT hint_text 
+                FROM question_hints 
+                WHERE question_id = %s 
+                ORDER BY hint_order;
+            """, (question_id,))
+            hints = [row[0] for row in cur.fetchall()]
 
-#         cur.close()
-#         conn.close()
+            # Fetch relevant table schema
+            cur.execute("""
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = %s;
+            """, (category.lower() + "_matches",))  # Assuming table names follow a pattern
 
-#         return jsonify({
-#             "username": username,
-#             "email": email,
-#             "xp": xp,
-#             "total_submissions": total_submissions,
-#             "correct_submissions": correct_submissions,
-#             "unique_questions_solved": unique_questions_solved,
-#             "accuracy": accuracy,
-#             "rank": user_rank,
-#             "fastest_query_time": fastest_time,
-#             "recent_activity": recent_activity,
-#             "daily_streak": daily_streak,
-#             "member_since": created_at.strftime("%B %Y")  # Format as "March 2025"
-#         }), 200
+            columns = [{"name": col[0], "type": col[1]} for col in cur.fetchall()]
 
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
+            # Fetch sample data and ensure time/date serialization
+            cur.execute(f"SELECT * FROM {category.lower()}_matches LIMIT 3;")
+            sample_data = [[serialize_value(value) for value in row] for row in cur.fetchall()]  # ✅ Convert TIME values
 
+            question_data = {
+                "problem": {
+                    "id": question_id,
+                    "question": question_text,
+                    "type": q_type,
+                    "category": category,
+                    "hints": hints
+                },
+                "tables": {
+                    category.lower() + "_matches": {
+                        "columns": columns,
+                        "sample_data": sample_data
+                    }
+                }
+            }
+
+            quest_data["questions"].append(question_data)
+
+        cur.close()
+        conn.close()
+
+        return jsonify(quest_data), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/quests/<int:quest_id>/next-question", methods=["GET"])
+@jwt_required()
+def get_next_question(quest_id):
+    """Retrieve the next unanswered question for the user in a quest."""
+    user_id = get_jwt_identity()
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Find the next unanswered question for the user
+        cur.execute("""
+            SELECT q.id, q.question, q.type, q.category
+            FROM quest_questions qq
+            JOIN questions q ON qq.question_id = q.id
+            WHERE qq.quest_id = %s
+            AND q.id NOT IN (
+                SELECT question_id FROM user_answers WHERE user_id = %s
+            )
+            ORDER BY qq.sequence
+            LIMIT 1;
+        """, (quest_id, user_id))
+
+        question = cur.fetchone()
+        if not question:
+            return jsonify({"message": "No more questions left in this quest"}), 200
+
+        cur.close()
+        conn.close()
+        return jsonify({"id": question[0], "question": question[1], "type": question[2], "category": question[3]}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ✅ 4. Submit an answer for a quest question
+@app.route("/quests/<int:quest_id>/submit-answer", methods=["POST"])
+@jwt_required()
+def submit_quest_answer(quest_id):
+    """Submit an answer for a quest question and track progress."""
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    question_id = data.get("question_id")
+    user_query = data.get("user_query")
+
+    if not question_id or not user_query:
+        return jsonify({"error": "Question ID and SQL query are required"}), 400
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Fetch correct answer
+        cur.execute("SELECT correct_query FROM questions WHERE id = %s;", (question_id,))
+        correct_query = cur.fetchone()
+        if not correct_query:
+            return jsonify({"error": "Invalid question ID"}), 400
+        correct_query = correct_query[0]
+
+        # Execute and compare results
+        cur.execute(correct_query)
+        correct_result = cur.fetchall()
+
+        try:
+            cur.execute(user_query)
+            user_result = cur.fetchall()
+        except Exception as e:
+            return jsonify({"error": "Invalid SQL query", "details": str(e)}), 400
+
+        is_correct = user_result == correct_result
+
+        # Store the answer
+        cur.execute("""
+            INSERT INTO user_answers (user_id, question_id, user_query, is_correct)
+            VALUES (%s, %s, %s, %s);
+        """, (user_id, question_id, user_query, is_correct))
+
+        # Update progress
+        if is_correct:
+            cur.execute("""
+                UPDATE user_quests 
+                SET questions_completed = questions_completed + 1, last_updated = NOW()
+                WHERE user_id = %s AND quest_id = %s;
+            """, (user_id, quest_id))
+
+            # Check if the quest is completed
+            cur.execute("""
+                SELECT COUNT(*) FROM quest_questions WHERE quest_id = %s;
+            """, (quest_id,))
+            total_questions = cur.fetchone()[0]
+
+            cur.execute("""
+                SELECT questions_completed FROM user_quests WHERE user_id = %s AND quest_id = %s;
+            """, (user_id, quest_id))
+            user_progress = cur.fetchone()[0]
+
+            if user_progress >= total_questions:
+                cur.execute("""
+                    UPDATE user_quests SET completed = TRUE WHERE user_id = %s AND quest_id = %s;
+                """, (user_id, quest_id))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"message": "Answer submitted successfully", "is_correct": is_correct}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ✅ 5. Fetch quest progress
+@app.route("/quests/<int:quest_id>/progress", methods=["GET"])
+@jwt_required()
+def get_quest_progress(quest_id):
+    """Retrieve the user's progress in a quest."""
+    user_id = get_jwt_identity()
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT questions_completed, completed FROM user_quests WHERE user_id = %s AND quest_id = %s;
+        """, (user_id, quest_id))
+        progress = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        if not progress:
+            return jsonify({"message": "No progress found"}), 404
+
+        return jsonify({"questions_completed": progress[0], "completed": progress[1]}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ✅ Submit SQL Answer
 
