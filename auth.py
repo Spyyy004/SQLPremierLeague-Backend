@@ -1189,6 +1189,13 @@ def get_csrf_token():
     return jsonify({"csrf_token": csrf_token})
 
 
+def convert_time_values(rows):
+    """Convert TIME objects to string format (HH:MM:SS) in query results."""
+    return [
+        [value.strftime("%H:%M:%S") if isinstance(value, datetime.time) else value for value in row]
+        for row in rows
+    ]
+
 @app.route("/submit-answer", methods=["POST"])
 @jwt_required()
 def submit_answer():
@@ -1247,7 +1254,7 @@ def submit_answer():
                 "error": "Invalid SQL query",
                 "details": str(e),
                 "user_query_result": None,
-                "correct_query_result": correct_result,
+                "correct_query_result": convert_time_values(correct_result),
                 "user_execution_time": None,
                 "correct_execution_time": correct_execution_time
             }), 400
@@ -1290,8 +1297,8 @@ def submit_answer():
         return jsonify({
             "message": "Query executed successfully" if not is_submit else "Answer submitted successfully",
             "is_correct": is_correct,
-            "user_query_result": user_result,
-            "correct_query_result": correct_result,
+            "user_query_result": convert_time_values(user_result),
+            "correct_query_result": convert_time_values(correct_result),
             "user_execution_time": user_execution_time,
             "correct_execution_time": correct_execution_time,
             "xp_award": xp_award-xp_spent,
