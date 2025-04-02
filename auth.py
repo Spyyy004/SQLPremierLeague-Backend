@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 from flask import Flask, request, jsonify, make_response
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import create_access_token, jwt_required, create_refresh_token, JWTManager, get_jwt_identity, verify_jwt_in_request
@@ -9,6 +11,7 @@ from datetime import time
 import datetime
 import psycopg2
 import re
+import json
 from datetime import time
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
@@ -45,7 +48,7 @@ DB_HOST = "localhost"
 DB_PORT = "5432"
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-
+DODO_SECRET = os.getenv("DODO_SECRET")
 def get_db_connection():
     try:
         conn = psycopg2.connect(DATABASE_URL)  # Direct connection without pooling
@@ -2387,3 +2390,64 @@ def report_issue():
     finally:
         if conn:
             conn.close()
+
+def verify_signature(raw_body, headers):
+    signature = headers.get("webhook-signature")
+    timestamp = headers.get("webhook-timestamp")
+    if not signature or not timestamp:
+        return False
+
+    try:
+        computed_signature = hmac.new(
+            DODO_SECRET.encode(),
+            msg=(timestamp + raw_body).encode(),
+            digestmod=hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(computed_signature, signature)
+    except Exception as e:
+        print("❌ Signature verification error:", e)
+        return False
+
+
+@app.route("/sql-premium", methods=["POST"])
+def handle_sql_webhook():
+    try:
+        raw_body = request.data.decode("utf-8")
+        headers = request.headers
+
+        if not verify_signature(raw_body, headers):
+            print("❌ Invalid webhook signature")
+            return jsonify({"error": "Invalid signature"}), 400
+        payload = json.loads(raw_body)
+        event_type = payload.get("type")
+        customer_email = payload.get("data", {}).get("customer", {}).get("email")
+
+        if not customer_email:
+            print("❌ Missing email in webhook payload")
+            return jsonify({"error": "Missing customer email"}), 400
+
+        if event_type == "payment.succeeded":
+            print(f"✅ SQL Payment succeeded for {customer_email}")
+
+            conn = get_db_connection()
+            if not conn:
+                return jsonify({"error": "Database connection failed"}), 500
+
+            try:
+                cur = conn.cursor()
+                cur.execute("UPDATE users SET is_premium = TRUE WHERE email = %s", (customer_email,))
+                conn.commit()
+                cur.close()
+                conn.close()
+                print(f"🎉 Upgraded {customer_email} to premium in SQL Premier League")
+                return jsonify({"success": True}), 200
+            except Exception as db_err:
+                print("❌ DB Update Error:", db_err)
+                return jsonify({"error": "Database update failed"}), 500
+
+        print(f"ℹ️ Unhandled SQL webhook event: {event_type}")
+        return jsonify({"received": True}), 200
+
+    except Exception as e:
+        print("❌ Webhook Processing Error:", str(e))
+        return jsonify({"error": "Internal server error"}), 500
