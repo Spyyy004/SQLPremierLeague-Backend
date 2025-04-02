@@ -2392,21 +2392,29 @@ def report_issue():
             conn.close()
 
 def verify_signature(raw_body, headers):
-    signature = headers.get("webhook-signature")
+    signature_header = headers.get("webhook-signature")
     timestamp = headers.get("webhook-timestamp")
-    if not signature or not timestamp:
+    
+    if not signature_header or not timestamp:
         return False
 
     try:
+        provided_signature = signature_header.split(",")[1] if "," in signature_header else signature_header
         computed_signature = hmac.new(
             DODO_SECRET.encode(),
             msg=(timestamp + raw_body).encode(),
             digestmod=hashlib.sha256
-        ).hexdigest()
-        return hmac.compare_digest(computed_signature, signature)
+        ).digest()
+
+        # Convert both to base64 for comparison
+        import base64
+        computed_signature_b64 = base64.b64encode(computed_signature).decode()
+
+        return hmac.compare_digest(computed_signature_b64, provided_signature)
     except Exception as e:
         print("❌ Signature verification error:", e)
         return False
+
 
 
 @app.route("/sql-premium", methods=["POST"])
