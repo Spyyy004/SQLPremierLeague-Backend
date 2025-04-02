@@ -8,3 +8,4 @@ sql-metadata
 flask-jwt-extended
 google-auth
 requests
+standardwebhooks
