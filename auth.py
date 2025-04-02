@@ -2432,7 +2432,7 @@ def handle_sql_webhook():
 
         try:
             wh = Webhook(DODO_SECRET)
-            wh.verify(raw_body, webhook_headers)
+            wh.verify(data=raw_body, headers=webhook_headers)
         except Exception as sig_err:
             print("❌ Invalid webhook signature:", sig_err)
             return jsonify({"error": "Invalid signature"}), 400
