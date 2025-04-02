@@ -10,6 +10,7 @@ import secrets
 from datetime import time
 import datetime
 import psycopg2
+from standardwebhooks import Webhook
 import re
 import json
 from datetime import time
@@ -2423,8 +2424,16 @@ def handle_sql_webhook():
         raw_body = request.data.decode("utf-8")
         headers = request.headers
 
-        if not verify_signature(raw_body, headers):
-            print("❌ Invalid webhook signature")
+        webhook_headers = {
+            "webhook-id": headers.get("webhook-id", ""),
+            "webhook-signature": headers.get("webhook-signature", ""),
+            "webhook-timestamp": headers.get("webhook-timestamp", "")
+        }
+
+        try:
+            Webhook.verify(raw_body, webhook_headers)
+        except Exception as sig_err:
+            print("❌ Invalid webhook signature:", sig_err)
             return jsonify({"error": "Invalid signature"}), 400
         payload = json.loads(raw_body)
         event_type = payload.get("type")
