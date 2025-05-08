@@ -2455,7 +2455,7 @@ def handle_sql_webhook():
                 cur = conn.cursor()
                 cur.execute(
                     "UPDATE users SET is_premium = TRUE, premium_activated_at = %s WHERE email = %s",
-                    (datetime.utcnow(), customer_email)
+                    (datetime.datetime.utcnow(), customer_email)
                 )
                 conn.commit()
                 cur.close()
