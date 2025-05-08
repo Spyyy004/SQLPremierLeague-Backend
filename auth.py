@@ -835,14 +835,14 @@ def get_profile():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # ✅ Fetch user details, XP, and account creation date
-        cur.execute("SELECT username, email, xp, created_at FROM users WHERE id = %s;", (user_id,))
+        # ✅ Fetch user details, XP, account creation date, and premium status
+        cur.execute("SELECT username, email, xp, created_at, is_premium FROM users WHERE id = %s;", (user_id,))
         user = cur.fetchone()
 
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        username, email, xp, created_at = user
+        username, email, xp, created_at, is_premium = user
 
         # ✅ Fetch user statistics (total submissions, correct answers, unique questions solved)
         cur.execute("""
@@ -913,6 +913,7 @@ def get_profile():
             "username": username,
             "email": email,
             "xp": xp,
+            "is_premium": is_premium,  # ✅ Added premium status
             "total_submissions": total_submissions,
             "correct_submissions": correct_submissions,
             "unique_questions_solved": unique_questions_solved,
